@@ -134,7 +134,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=9; // bump on every upload — players must match to play together
+const GAME_VERSION=10; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -164,9 +164,10 @@ let sendPos = null;      // broadcast action
 const mpStatusEl = document.getElementById("mpStatus");
 (async function initTrystero() {
   const candidates = [
-    ["mqtt",  "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/mqtt/+esm"],
-    ["nostr", "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/nostr/+esm"],
-    ["default","https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/+esm"],
+    ["mqtt",  "https://cdn.jsdelivr.net/npm/@trystero-p2p/mqtt@"+TRYSTERO_VER+"/+esm"],
+    ["nostr", "https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@"+TRYSTERO_VER+"/+esm"],
+    ["mqtt-shim",  "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/mqtt/+esm"],
+    ["nostr-shim", "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/nostr/+esm"],
   ];
   for (const [name, url] of candidates) {
     try {
@@ -338,6 +339,7 @@ function leaveRoom(){
 
 // ---------- Start game ----------
 function startGame(code,seed,solo){
+  lastErr="";
   const color=PLAYER_COLORS[Math.floor(Math.random()*PLAYER_COLORS.length)];
   const name=($("nameInput").value||"Hopper").slice(0,12);
   const level=generateLevel(seed,1);
