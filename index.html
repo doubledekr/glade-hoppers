@@ -134,7 +134,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=10; // bump on every upload — players must match to play together
+const GAME_VERSION=11; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -359,7 +359,7 @@ function startGame(code,seed,solo){
   G.peerCount=0;
   if(!solo&&joinRoomFn&&code){
     try{
-      room=joinRoomFn({appId:APP_ID,rtcConfig:RTC_CONFIG},code);
+      room=joinRoomFn({appId:APP_ID,rtcConfig:RTC_CONFIG},code,{onJoinError:(e)=>{lastErr=("join: "+(e&&e.error||e&&e.message||e)).slice(0,120);}});
       const [send,get]=room.makeAction("pos");
       sendPos=send;
       const [sn,gn]=room.makeAction("next");
