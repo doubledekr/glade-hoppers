@@ -134,16 +134,20 @@
 
 <script>
 "use strict";
-const GAME_VERSION=8; // bump on every upload — players must match to play together
+const GAME_VERSION=9; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
+// Surface silent errors on screen (phones have no console)
+let lastErr="";
+window.addEventListener("error",e=>{lastErr=(e.message||"error").slice(0,120);});
+window.addEventListener("unhandledrejection",e=>{lastErr=String(e.reason&&e.reason.message||e.reason||"promise error").slice(0,120);});
 // ============================================================
 // MULTIPLAYER: Trystero (peer-to-peer WebRTC) — zero setup.
-// Players connect directly to each other; the room code IS the
-// room. Levels are seeded from the code, so everyone in a room
-// sees identical layouts automatically.
+// Pinned version + MQTT matchmaking (public brokers), with a
+// nostr fallback. Room code doubles as the level seed.
 // TURN relay included so phones behind carrier NAT can connect.
 // ============================================================
 const APP_ID = "glade-hoppers-dm-v1";
+const TRYSTERO_VER = "0.25.3";
 const RTC_CONFIG = {
   iceServers: [
     { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
@@ -154,24 +158,36 @@ const RTC_CONFIG = {
 };
 let joinRoomFn = null;   // trystero's joinRoom, loaded below
 let getRelaySocketsFn = null; // diagnostics: are we even reaching the matchmaking relays?
+let mpStrategy = "";
 let room = null;         // active trystero room
 let sendPos = null;      // broadcast action
 const mpStatusEl = document.getElementById("mpStatus");
 (async function initTrystero() {
-  try {
-    let mod;
+  const candidates = [
+    ["mqtt",  "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/mqtt/+esm"],
+    ["nostr", "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/nostr/+esm"],
+    ["default","https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/+esm"],
+  ];
+  for (const [name, url] of candidates) {
     try {
-      mod = await import("https://cdn.jsdelivr.net/npm/trystero/nostr/+esm");
-    } catch (e) {
-      mod = await import("https://cdn.jsdelivr.net/npm/trystero/+esm");
-    }
-    joinRoomFn = mod.joinRoom;
-    getRelaySocketsFn = mod.getRelaySockets || null;
-    mpStatusEl.innerHTML = '<span class="st-ok">● Multiplayer ready (peer-to-peer) — host or join below</span>';
-  } catch (e) {
-    mpStatusEl.innerHTML = '<span class="st-bad">● Couldn\'t load the multiplayer library: ' + (e.message || e) + '. Check your connection, or Play Solo.</span>';
+      const mod = await import(url);
+      if (!mod.joinRoom) continue;
+      joinRoomFn = mod.joinRoom;
+      getRelaySocketsFn = mod.getRelaySockets || null;
+      mpStrategy = name;
+      mpStatusEl.innerHTML = '<span class="st-ok">● Multiplayer ready (peer-to-peer via '+name+') — host or join below</span>';
+      return;
+    } catch (e) { lastErr = (e.message||String(e)).slice(0,120); }
   }
+  mpStatusEl.innerHTML = '<span class="st-bad">● Couldn\'t load the multiplayer library ('+lastErr+'). Check your connection, or Play Solo.</span>';
 })();
+function relayCount(){
+  if(!getRelaySocketsFn)return -1; // unknown
+  try{
+    const socks=getRelaySocketsFn();
+    return Object.values(socks).filter(ws=>ws&&ws.readyState===1).length;
+  }catch(e){return -1;}
+}
 function relayCount(){
   if(!getRelaySocketsFn)return -1; // unknown
   try{
@@ -721,8 +737,9 @@ function updateHud(s,dt){
     }else{
       const rc=relayCount();
       if(rc===0)link=' · <span style="color:#ff8fa0">🔗 can\'t reach matchmaking relays — network may block them</span>';
-      else if(rc>0)link=' · <span style="color:#ffb86b">🔗 searching for peers… (relays: '+rc+' ✓)</span>';
-      else link=' · <span style="color:#ffb86b">🔗 searching for peers…</span>';
+      else if(rc>0)link=' · <span style="color:#ffb86b">🔗 searching for peers… ('+mpStrategy+', relays: '+rc+' ✓)</span>';
+      else link=' · <span style="color:#ffb86b">🔗 searching for peers… ('+mpStrategy+')</span>';
+      if(lastErr)link+=' <span style="color:#ff8fa0; font-size:11px">['+lastErr+']</span>';
     }
     roomChip.innerHTML='Room <b>'+s.code+'</b>'+link+(names?(" ·"+names):"");
   }
