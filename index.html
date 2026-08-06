@@ -147,7 +147,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=18; // bump on every upload — players must match to play together
+const GAME_VERSION=19; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -1157,6 +1157,34 @@ function draw(s){
     ctx.beginPath();ctx.arc(l.x,l.y+bob,16,0,7);ctx.fill();
     ctx.fillStyle="#fff";
     ctx.beginPath();ctx.arc(l.x-3,l.y+bob-3,3,0,7);ctx.fill();
+  }
+  if(s.level.shop){
+    const sh=s.level.shop;
+    // awning posts
+    ctx.fillStyle="#6b4a2e";
+    ctx.fillRect(sh.x,sh.y-78,7,78);
+    ctx.fillRect(sh.x+64,sh.y-78,7,78);
+    // counter
+    ctx.fillStyle="#8a5a3a";
+    ctx.beginPath();ctx.roundRect(sh.x-6,sh.y-36,84,14,4);ctx.fill();
+    // striped awning
+    for(let i=0;i<5;i++){
+      ctx.fillStyle=i%2?"#ffd447":"#ff6b9d";
+      ctx.beginPath();
+      ctx.moveTo(sh.x-10+i*18,sh.y-78);
+      ctx.lineTo(sh.x+8+i*18,sh.y-78);
+      ctx.lineTo(sh.x+4+i*18,sh.y-62);
+      ctx.lineTo(sh.x-6+i*18,sh.y-62);
+      ctx.fill();
+    }
+    // sign
+    ctx.fillStyle="rgba(10,6,25,0.7)";
+    ctx.beginPath();ctx.roundRect(sh.x+2,sh.y-108,68,22,6);ctx.fill();
+    ctx.fillStyle="#ffd447";ctx.font="bold 13px sans-serif";ctx.textAlign="center";
+    ctx.fillText("✦ SHOP",sh.x+36,sh.y-92);
+    // bobbing heart on the counter
+    ctx.fillStyle="#ff6b9d";ctx.font="16px sans-serif";
+    ctx.fillText("❤",sh.x+36,sh.y-44+Math.sin(s.t*3)*3);
   }
   if(s.level.door){
     const d=s.level.door;
