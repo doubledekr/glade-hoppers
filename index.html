@@ -135,7 +135,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=13; // bump on every upload — players must match to play together
+const GAME_VERSION=14; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -528,6 +528,20 @@ function update(s,dt){
   s.camX+=(Math.max(0,Math.min(s.level.width-VIEW_W,targetX))-s.camX)*Math.min(1,6*dt);
   const targetY=Math.max(-80,Math.min(160,s.py-VIEW_H*0.55));
   s.camY+=(targetY-s.camY)*Math.min(1,4*dt);
+
+  // smooth ghost players toward their latest network position
+  for(const id in s.others){
+    const o=s.others[id];
+    if(!o)continue;
+    if(o.dx===undefined||o.dlvl!==o.lvl||Math.abs(o.dx-o.x)>400||Math.abs(o.dy-o.y)>400){
+      o.dx=o.x;o.dy=o.y;o.dlvl=o.lvl; // snap on first packet, level change, or big teleport
+    }else{
+      const k=Math.min(1,12*dt);
+      o.dx+=(o.x-o.dx)*k;
+      o.dy+=(o.y-o.dy)*k;
+    }
+    o.dvx=(o.x-o.dx)*10; // rough velocity estimate so their run animation plays
+  }
 }
 
 function updateBoss(s,dt){
@@ -642,11 +656,12 @@ function draw(s){
     const o=s.others[id];
     if(!o||o.lvl!==s.levelNum)continue;
     if(o.rt&&Date.now()-o.rt>15000)continue; // stale by OUR clock, not theirs
+    const gx=o.dx!==undefined?o.dx:o.x, gy=o.dy!==undefined?o.dy:o.y;
     ctx.globalAlpha=0.65;
-    drawHero(o.x,o.y,o.face||1,o.color||"#fff",1,0,s.t);
+    drawHero(gx,gy,o.face||1,o.color||"#fff",1,o.dvx||0,s.t);
     ctx.globalAlpha=0.9;
     ctx.fillStyle="#fff";ctx.font="bold 12px sans-serif";ctx.textAlign="center";
-    ctx.fillText(o.name||"?",o.x+PLAYER_W/2,o.y-14);
+    ctx.fillText(o.name||"?",gx+PLAYER_W/2,gy-14);
     ctx.globalAlpha=1;
   }
 
