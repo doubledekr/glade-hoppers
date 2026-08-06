@@ -135,7 +135,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=16; // bump on every upload — players must match to play together
+const GAME_VERSION=17; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -203,63 +203,123 @@ const PALETTES=[
   {sky1:"#0e2a3f",sky2:"#1d6a73",hill:"#123448",ground:"#4ab06a",groundDark:"#2f7d4b",accent:"#ff9d47",glow:"#ffd0a0"},
   {sky1:"#2a1030",sky2:"#7a2d55",hill:"#3c1745",ground:"#c46a3d",groundDark:"#8f4527",accent:"#7ef0d2",glow:"#c2fff0"},
   {sky1:"#101d3a",sky2:"#2d4f8a",hill:"#182a52",ground:"#7f8fd1",groundDark:"#5a68a8",accent:"#ffd447",glow:"#fff2bd"},
+  {sky1:"#231a0e",sky2:"#8a5a2d",hill:"#40300f",ground:"#c9a24a",groundDark:"#96742e",accent:"#7ee0ff",glow:"#c9f2ff"},
+  {sky1:"#0d2418",sky2:"#2d8a5e",hill:"#123422",ground:"#5ac97e",groundDark:"#37945a",accent:"#ffb0e0",glow:"#ffd9f0"},
+  {sky1:"#2d0f0f",sky2:"#8a2d3d",hill:"#451414",ground:"#d9755a",groundDark:"#a24e38",accent:"#ffe28a",glow:"#fff2c9"},
+  {sky1:"#05070f",sky2:"#141c3a",hill:"#0b1024",ground:"#a8b0c9",groundDark:"#7a8299",accent:"#7ef0ff",glow:"#d0faff"},
 ];
 const PLAYER_COLORS=["#ffd447","#ff6b9d","#5ee0ff","#8dff6b","#ff9d47","#c78bff"];
 
 function isBossLevel(n){return n%20===0&&n>0;}
+function levelBands(n){
+  return {
+    oneway:n>=6, walkers:n>=6, movers:n>=13,
+    crumble:n>=21, pads:n>=21,
+    vmovers:n>=31, jelly:n>=31, fans:n>=31,
+    flyers:n>=41, lowgrav:(n>=41&&n%7===3),
+  };
+}
+const BOSS_NAMES=["GLADE TYRANT","BRAMBLE KING","HOLLOW COLOSSUS","STORM WARDEN","THE GLADE ETERNAL"];
 
 // ---------- Level generation ----------
 function generateLevel(roomSeed, levelNum){
   const rand=mulberry32(hashStr(roomSeed+":"+levelNum));
-  const palette=PALETTES[levelNum%PALETTES.length];
+  const B=levelBands(levelNum);
+  const gravMult=B.lowgrav?0.55:1;
+  const palette=B.lowgrav?PALETTES[7]:PALETTES[levelNum%7];
   if(isBossLevel(levelNum)){
-    const w=1700;
+    const tier=Math.floor(levelNum/20);
+    const scale=1+0.22*(tier-1);
+    const w=1700+tier*120;
     const plats=[{x:0,y:460,w:w,h:200,type:"ground"},
       {x:220,y:330,w:160,h:20,type:"float"},
       {x:w-380,y:330,w:160,h:20,type:"float"},
       {x:w/2-90,y:240,w:180,h:20,type:"float"}];
-    return {boss:true,width:w,platforms:plats,spikes:[],lums:[],
-      spawn:{x:80,y:380},door:null,palette,
-      bossState:{x:w-260,y:380,vx:0,vy:0,hp:3+Math.floor(levelNum/20),maxHp:3+Math.floor(levelNum/20),invuln:0,hopT:0.8,dead:false,deathT:0,face:-1}};
+    return {boss:true,width:w,platforms:plats,spikes:[],lums:[],enemies:[],fans:[],projectiles:[],waves:[],gravMult:1,
+      spawn:{x:80,y:380},door:null,palette:PALETTES[(2+tier)%7],
+      bossState:{x:w-260-60*scale,y:460-100*scale,vx:0,vy:0,hp:2+tier*2,maxHp:2+tier*2,invuln:0,hopT:0.8,dead:false,deathT:0,face:-1,tier,scale,sumT:7,projT:3,airborne:false,lastVy:0}};
   }
-  const difficulty=Math.min(1,levelNum/40);
-  const width=2600+Math.min(levelNum*90,2400);
-  const platforms=[],spikes=[],lums=[];
+  const difficulty=Math.min(1,levelNum/60);
+  const width=2600+Math.min(levelNum*80,2600);
+  const platforms=[],spikes=[],lums=[],enemies=[],fans=[];
   let x=0, groundY=440+Math.floor(rand()*2)*TILE;
   platforms.push({x:0,y:groundY,w:360,h:300,type:"ground"});
   x=360;
   while(x<width-500){
-    // pick the next segment's elevation FIRST, then size the gap to what the jump can clear
+    // elevation first, then a gap the jump can actually clear (low-grav jumps are much bigger)
     const prevY=groundY;
-    const newY=Math.max(280,Math.min(480,groundY+(Math.floor(rand()*5)-2)*TILE));
-    const rise=prevY-newY; // >0 = next segment is higher
-    // jump budget: ~170px max height, ~280px max flat distance — trade one for the other
+    const newY=Math.max(260,Math.min(480,groundY+(Math.floor(rand()*5)-2)*TILE));
+    const rise=prevY-newY;
     let maxGap;
-    if(rise>=80)maxGap=90;        // steep climb: only a hop-sized gap
-    else if(rise>=40)maxGap=150;  // one-tile climb: modest gap
-    else if(rise<=-40)maxGap=230; // dropping down: generous gap
-    else maxGap=200;              // level: standard gap
+    if(rise>=80)maxGap=B.lowgrav?150:90;
+    else if(rise>=40)maxGap=B.lowgrav?210:150;
+    else if(rise<=-40)maxGap=B.lowgrav?300:230;
+    else maxGap=B.lowgrav?260:200;
     const gap=rand()<0.75?(70+rand()*(maxGap-70)*(0.5+0.5*difficulty)):0;
     x+=gap;
     const segW=220+rand()*320;
     groundY=newY;
     platforms.push({x,y:groundY,w:segW,h:300,type:"ground"});
-    // helper platform over the biggest gaps as a safety net
+    // bridge over the biggest gaps: static, moving, or crumbling depending on level band
     if(gap>170){
       const lowY=Math.max(prevY,newY);
-      platforms.push({x:x-gap/2-55,y:lowY-90,w:110,h:20,type:"float"});
-      lums.push({x:x-gap/2,y:lowY-130,got:false});
+      const bx=x-gap/2-55, by=lowY-90;
+      const r=rand();
+      if(B.movers&&r<0.4){
+        platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:Math.max(10,Math.min(60,gap/2-70)),spd:1.4+rand()*0.8,phase:rand()*6.28});
+      }else if(B.crumble&&r<0.7){
+        platforms.push({x:bx,y:by,w:110,h:18,type:"crumble",cState:0,cT:0});
+      }else{
+        platforms.push({x:bx,y:by,w:110,h:20,type:"float"});
+      }
+      lums.push({x:x-gap/2,y:by-40,got:false});
+      if(B.flyers&&rand()<0.35)enemies.push({kind:"flyer",x:x-gap/2,y:by-120,bx:x-gap/2,by:by-120,amp:40+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
     }
-    // spikes: only on long segments, kept 100px clear of both edges so landings are always safe
-    if(segW>320&&rand()<0.22+difficulty*0.28&&x>700){
+    // spikes (safe margins) OR a patrolling critter — never both on one segment
+    if(segW>320&&rand()<0.20+difficulty*0.3&&x>700){
       const sw=50+rand()*30;
       const sx=x+100+rand()*(segW-200-sw);
       spikes.push({x:sx,y:groundY,w:sw});
+    }else if(B.walkers&&segW>300&&rand()<0.25+difficulty*0.35&&x>600){
+      enemies.push({kind:"walker",x:x+50+rand()*(segW-160),y:groundY-26,x0:x+24,x1:x+segW-24,dir:rand()<0.5?1:-1,spd:60+rand()*50+difficulty*60,dead:false});
     }
-    if(rand()<0.55){
+    // overhead platforms: solid or jump-through
+    if(rand()<0.6){
       const fx=x+rand()*segW*0.6, fy=groundY-110-rand()*50;
-      platforms.push({x:fx,y:fy,w:100+rand()*90,h:20,type:"float"});
+      const ptype=(B.oneway&&rand()<0.5)?"oneway":"float";
+      platforms.push({x:fx,y:fy,w:100+rand()*90,h:ptype==="oneway"?12:20,type:ptype});
       if(rand()<0.7)lums.push({x:fx+50,y:fy-40,got:false});
+      // vertical elevator up to a bonus ledge
+      if(B.vmovers&&rand()<0.2){
+        platforms.push({x:fx+150,y:fy-40,w:90,h:16,type:"moving",ax:false,amp:70,spd:1.1+rand()*0.6,phase:rand()*6.28});
+        platforms.push({x:fx+140,y:fy-190,w:120,h:16,type:"float"});
+        lums.push({x:fx+200,y:fy-230,got:false});
+      }
+    }
+    // bounce pad with a lum trail straight up
+    if(B.pads&&rand()<0.22&&segW>240){
+      const padX=x+60+rand()*(segW-160);
+      let clear=true;
+      for(const sp of spikes)if(Math.abs(sp.x-padX)<130)clear=false;
+      if(clear){
+        platforms.push({x:padX,y:groundY-14,w:56,h:14,type:"pad"});
+        lums.push({x:padX+28,y:groundY-190,got:false});
+        lums.push({x:padX+28,y:groundY-260,got:false});
+      }
+    }
+    // fan shaft: updraft column to a high ledge
+    if(B.fans&&rand()<0.18&&segW>300){
+      const fanX=x+80+rand()*(segW-220);
+      fans.push({x:fanX,y:groundY-300,w:70,h:300});
+      platforms.push({x:fanX-40,y:groundY-280,w:150,h:18,type:"float"});
+      lums.push({x:fanX+35,y:groundY-150,got:false});
+      lums.push({x:fanX+35,y:groundY-320,got:false});
+    }
+    // bouncy jelly — a living trampoline (harmless, bounces you high)
+    if(B.jelly&&rand()<0.15&&segW>260){
+      const jx=x+segW/2;
+      enemies.push({kind:"jelly",x:jx,y:groundY-30,squish:0,dead:false});
+      lums.push({x:jx,y:groundY-200,got:false});
     }
     if(rand()<0.6)lums.push({x:x+segW/2,y:groundY-50,got:false});
     if(gap>120&&gap<=170)lums.push({x:x-gap/2,y:Math.max(prevY,newY)-90,got:false});
@@ -267,7 +327,7 @@ function generateLevel(roomSeed, levelNum){
   }
   platforms.push({x,y:groundY,w:500,h:300,type:"ground"});
   const door={x:x+340,y:groundY-84,w:56,h:84};
-  return {boss:false,width:x+500,platforms,spikes,lums,
+  return {boss:false,width:x+500,platforms,spikes,lums,enemies,fans,projectiles:[],waves:[],gravMult,
     spawn:{x:60,y:platforms[0].y-100},door,palette,bossState:null};
 }
 
@@ -452,8 +512,16 @@ function goToLevel(s,n,clearedBy){
   s.level=generateLevel(s.seed,n);
   s.px=s.level.spawn.x;s.py=s.level.spawn.y;s.vx=0;s.vy=0;
   s.hearts=3;s.invuln=1;
-  const lvlText=isBossLevel(n)?"⚔️ BOSS — Level "+n:"Level "+n;
-  showBanner(clearedBy?(clearedBy+" cleared it! → "+lvlText):lvlText);
+  let lvlText;
+  if(isBossLevel(n)){
+    const tier=Math.floor(n/20);
+    const bn=BOSS_NAMES[Math.min(tier-1,BOSS_NAMES.length-1)];
+    document.querySelector("#bossBar .label").textContent=bn;
+    lvlText="\u2694\uFE0F "+bn+" \u2014 Level "+n;
+  }else{
+    lvlText="Level "+n+((s.level.gravMult||1)<1?" \uD83C\uDF19 LOW GRAVITY":"");
+  }
+  showBanner(clearedBy?(clearedBy+" cleared it! \u2192 "+lvlText):lvlText);
 }
 function nextLevel(s){
   const n=s.levelNum+1;
@@ -472,6 +540,30 @@ function spawnDust(s,x,y,n){
 function update(s,dt){
   s.t+=dt;
   if(s.invuln>0)s.invuln-=dt;
+  const L=s.level, GM=L.gravMult||1;
+
+  // --- platform motion: compute current positions, remember previous for carrying ---
+  for(const p of L.platforms){
+    p.prevX=p.curX!==undefined?p.curX:p.x;
+    p.prevY=p.curY!==undefined?p.curY:p.y;
+    if(p.type==="moving"){
+      const ph=Math.sin(s.t*p.spd+p.phase);
+      p.curX=p.x+(p.ax?ph*p.amp:0);
+      p.curY=p.y+(p.ax?0:ph*p.amp);
+    }else{p.curX=p.x;p.curY=p.y;}
+    if(p.type==="crumble"){
+      if(p.cState===1){p.cT-=dt;if(p.cT<=0){p.cState=2;p.cT=2.5;}}
+      else if(p.cState===2){p.cT-=dt;if(p.cT<=0){p.cState=0;}}
+    }
+  }
+  // ride along with the moving platform we stood on last frame
+  if(s.ride&&s.ride.type==="moving"){
+    s.px+=s.ride.curX-s.ride.prevX;
+    s.py+=s.ride.curY-s.ride.prevY;
+  }
+  s.ride=null;
+
+  // --- horizontal movement ---
   const left=keys["ArrowLeft"]||keys["KeyA"], right=keys["ArrowRight"]||keys["KeyD"];
   const ctrl=s.grounded?1:AIR_CONTROL;
   if(right&&!left){s.vx+=RUN_ACCEL*ctrl*dt;s.face=1;}
@@ -480,52 +572,132 @@ function update(s,dt){
   else s.vx*=(1-0.6*dt);
   s.vx=Math.max(-RUN_MAX,Math.min(RUN_MAX,s.vx));
 
+  // --- jump: buffer + coyote + variable height ---
   if(s.buffer>0)s.buffer-=dt;
   if(s.grounded)s.coyote=COYOTE;else if(s.coyote>0)s.coyote-=dt;
   if(s.buffer>0&&s.coyote>0){
     s.vy=JUMP_VEL;s.holdT=0;s.buffer=0;s.coyote=0;s.grounded=false;s.squash=1.25;
     spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,6);
   }
-  let g=GRAV;
+  let g=GRAV*GM;
   if(s.vy<0&&s.holding&&s.holdT<MAX_HOLD){g*=HOLD_GRAV_MULT;s.holdT+=dt;}
   else if(Math.abs(s.vy)<APEX_WINDOW&&!s.grounded)g*=APEX_MULT;
   s.vy+=g*dt;s.vy=Math.min(s.vy,1100);
 
+  // fans: strong updraft inside the column
+  for(const f of L.fans){
+    if(s.px+PLAYER_W>f.x&&s.px<f.x+f.w&&s.py+PLAYER_H>f.y&&s.py<f.y+f.h){
+      s.vy-=3200*GM*dt;
+      if(s.vy<-460)s.vy=-460;
+      if(Math.random()<0.3)spawnDust(s,f.x+Math.random()*f.w,s.py+PLAYER_H,1);
+    }
+  }
+
+  // --- integrate + collide ---
+  const solidWall=(p)=>p.type!=="oneway"&&p.type!=="pad"&&!(p.type==="crumble"&&p.cState===2);
   const wasGrounded=s.grounded;
   s.grounded=false;
+  // X axis
   s.px+=s.vx*dt;
-  for(const p of s.level.platforms){
-    if(rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},p)){
-      if(s.vx>0)s.px=p.x-PLAYER_W;else if(s.vx<0)s.px=p.x+p.w;
+  for(const p of L.platforms){
+    if(!solidWall(p))continue;
+    const R={x:p.curX,y:p.curY,w:p.w,h:p.h};
+    if(rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},R)){
+      if(s.vx>0)s.px=R.x-PLAYER_W;else if(s.vx<0)s.px=R.x+R.w;
       s.vx=0;
     }
   }
+  // Y axis
+  const prevBottom=s.py+PLAYER_H;
   s.py+=s.vy*dt;
-  for(const p of s.level.platforms){
-    if(rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},p)){
-      if(s.vy>0){
-        s.py=p.y-PLAYER_H;s.grounded=true;
-        if(!wasGrounded&&s.vy>500){s.squash=0.6;spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,8);}
-        s.vy=0;
-      }else if(s.vy<0){s.py=p.y+p.h;s.vy=0;s.holdT=MAX_HOLD;}
+  for(const p of L.platforms){
+    if(p.type==="crumble"&&p.cState===2)continue;
+    const R={x:p.curX,y:p.curY,w:p.w,h:p.h};
+    if(!rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},R))continue;
+    if(p.type==="oneway"){
+      if(!(s.vy>0&&prevBottom<=R.y+8))continue; // pass through unless landing from above
     }
+    if(s.vy>0){
+      if(p.type==="pad"){
+        if(prevBottom<=R.y+10){ // bounce!
+          s.py=R.y-PLAYER_H;
+          s.vy=-1150;s.holdT=MAX_HOLD;s.squash=1.4;
+          p.boing=0.3;
+          spawnDust(s,R.x+R.w/2,R.y,8);
+        }
+        continue;
+      }
+      s.py=R.y-PLAYER_H;s.grounded=true;s.ride=p;
+      if(p.type==="crumble"&&p.cState===0){p.cState=1;p.cT=0.7;}
+      if(!wasGrounded&&s.vy>500){s.squash=0.6;spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,8);}
+      s.vy=0;
+    }else if(s.vy<0&&p.type!=="oneway"&&p.type!=="pad"){s.py=R.y+R.h;s.vy=0;s.holdT=MAX_HOLD;}
   }
-  s.px=Math.max(0,Math.min(s.level.width-PLAYER_W,s.px));
+  for(const p of L.platforms)if(p.boing>0)p.boing-=dt;
+  s.px=Math.max(0,Math.min(L.width-PLAYER_W,s.px));
   s.squash+=(1-s.squash)*Math.min(1,12*dt);
 
   if(s.py>900){
     s.hearts=Math.max(0,s.hearts-1);
     if(s.hearts<=0)s.hearts=3;
-    s.px=s.level.spawn.x;s.py=s.level.spawn.y;s.vx=0;s.vy=0;s.invuln=1.2;
+    s.px=L.spawn.x;s.py=L.spawn.y;s.vx=0;s.vy=0;s.invuln=1.2;
   }
-  for(const sp of s.level.spikes){
+  for(const sp of L.spikes){
     if(rectsOverlap({x:s.px+4,y:s.py+8,w:PLAYER_W-8,h:PLAYER_H-8},{x:sp.x,y:sp.y-24,w:sp.w,h:24}))hurt(s);
   }
-  for(const l of s.level.lums){
+
+  // --- enemies ---
+  const pbox={x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H};
+  for(const e of L.enemies){
+    if(e.dead)continue;
+    let R;
+    if(e.kind==="walker"){
+      e.x+=e.dir*e.spd*dt;
+      if(e.x<e.x0){e.x=e.x0;e.dir=1;}
+      if(e.x>e.x1-28){e.x=e.x1-28;e.dir=-1;}
+      R={x:e.x,y:e.y,w:28,h:26};
+    }else if(e.kind==="flyer"){
+      e.y=e.by+Math.sin(s.t*e.spd+e.ph)*e.amp;
+      e.x=e.bx+Math.sin(s.t*e.spd*0.5+e.ph)*30;
+      R={x:e.x-15,y:e.y-12,w:30,h:24};
+    }else{ // jelly
+      if(e.squish>0)e.squish-=dt;
+      R={x:e.x-22,y:e.y,w:44,h:30};
+    }
+    if(rectsOverlap(pbox,R)){
+      const stomp=s.vy>120&&(s.py+PLAYER_H)<R.y+R.h*0.6;
+      if(e.kind==="jelly"){
+        if(stomp){s.py=R.y-PLAYER_H;s.vy=-980;s.holdT=MAX_HOLD;s.squash=1.4;e.squish=0.3;spawnDust(s,e.x,e.y,6);}
+        // jellies are harmless from the side — living trampolines
+      }else if(stomp){
+        e.dead=true;s.vy=-520;s.holdT=MAX_HOLD;
+        spawnDust(s,R.x+R.w/2,R.y,10);
+        L.lums.push({x:R.x+R.w/2,y:R.y-30,got:false}); // defeated enemies drop a lum
+      }else{
+        hurt(s,s.px<R.x?-1:1);
+      }
+    }
+  }
+
+  // --- boss hazards: shockwaves + projectiles (live on every level's arrays) ---
+  for(const w of L.waves){
+    w.x+=w.dir*380*dt;w.life-=dt;
+    if(s.invuln<=0&&rectsOverlap(pbox,{x:w.x-17,y:434,w:34,h:26}))hurt(s,w.dir);
+  }
+  L.waves=L.waves.filter(w=>w.life>0&&w.x>-40&&w.x<L.width+40);
+  for(const pr of L.projectiles){
+    pr.vy+=1400*dt;pr.x+=pr.vx*dt;pr.y+=pr.vy*dt;
+    if(rectsOverlap(pbox,{x:pr.x-10,y:pr.y-10,w:20,h:20})){hurt(s,Math.sign(pr.vx)||1);pr.dead=true;}
+    if(pr.y>470){pr.dead=true;spawnDust(s,pr.x,460,4);}
+  }
+  L.projectiles=L.projectiles.filter(pr=>!pr.dead);
+
+  // lums
+  for(const l of L.lums){
     if(!l.got&&Math.abs(s.px+PLAYER_W/2-l.x)<30&&Math.abs(s.py+PLAYER_H/2-l.y)<34){l.got=true;s.lumCount+=1;}
   }
-  if(s.level.door&&rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},s.level.door))nextLevel(s);
-  if(s.level.boss&&s.level.bossState)updateBoss(s,dt);
+  if(L.door&&rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},L.door))nextLevel(s);
+  if(L.boss&&L.bossState)updateBoss(s,dt);
 
   s.dust=s.dust.filter(d=>(d.life-=dt)>0);
   for(const d of s.dust){d.x+=d.vx*dt;d.y+=d.vy*dt;d.vy+=600*dt;}
@@ -536,7 +708,7 @@ function update(s,dt){
   s._lastMoveSig=moveSig;
 
   const targetX=s.px+PLAYER_W/2-VIEW_W/2+s.face*60;
-  s.camX+=(Math.max(0,Math.min(s.level.width-VIEW_W,targetX))-s.camX)*Math.min(1,6*dt);
+  s.camX+=(Math.max(0,Math.min(L.width-VIEW_W,targetX))-s.camX)*Math.min(1,6*dt);
   const targetY=Math.max(-80,Math.min(160,s.py-VIEW_H*0.55));
   s.camY+=(targetY-s.camY)*Math.min(1,4*dt);
 
@@ -544,43 +716,75 @@ function update(s,dt){
   for(const id in s.others){
     const o=s.others[id];
     if(!o)continue;
-    const age=o.rt?Math.min(0.15,(Date.now()-o.rt)/1000):0; // how stale is the last packet (capped)
-    const tx=o.x+(o.vx||0)*age, ty=o.y+(o.vy||0)*age;       // predicted current position
+    const age=o.rt?Math.min(0.15,(Date.now()-o.rt)/1000):0;
+    const tx=o.x+(o.vx||0)*age, ty=o.y+(o.vy||0)*age;
     if(o.dx===undefined||o.dlvl!==o.lvl||Math.abs(o.dx-tx)>400||Math.abs(o.dy-ty)>400){
-      o.dx=tx;o.dy=ty;o.dlvl=o.lvl; // snap on first packet, level change, or big teleport
+      o.dx=tx;o.dy=ty;o.dlvl=o.lvl;
     }else{
       const err=Math.hypot(tx-o.dx,ty-o.dy);
-      const k=Math.min(1,(8+err*0.15)*dt); // small error = gentle glide, big error = rapid catch-up
+      const k=Math.min(1,(8+err*0.15)*dt);
       o.dx+=(tx-o.dx)*k;
       o.dy+=(ty-o.dy)*k;
     }
-    o.dvx=o.vx||0; // real velocity drives their run animation
+    o.dvx=o.vx||0;
   }
 }
 
 function updateBoss(s,dt){
-  const b=s.level.bossState,BW=90,BH=100;
+  const b=s.level.bossState;
+  const BW=90*b.scale,BH=100*b.scale,GT=460;
   if(b.dead){
     b.deathT+=dt;
-    if(b.deathT>1.2&&!s.level.door)s.level.door={x:s.level.width/2-28,y:460-84,w:56,h:84};
+    if(b.deathT>1.2&&!s.level.door)s.level.door={x:s.level.width/2-28,y:GT-84,w:56,h:84};
     return;
   }
   if(b.invuln>0)b.invuln-=dt;
   b.hopT-=dt;
-  const onGround=b.y>=460-BH-1;
+  const onGround=b.y>=GT-BH-1;
   if(onGround){
-    b.vy=0;b.y=460-BH;
+    // tier 2+: heavy landings send shockwaves rolling both directions — jump them!
+    if(b.airborne&&b.lastVy>500&&b.tier>=2){
+      s.level.waves.push({x:b.x+BW/2,dir:1,life:2.2});
+      s.level.waves.push({x:b.x+BW/2,dir:-1,life:2.2});
+      spawnDust(s,b.x+BW/2,GT,16);
+    }
+    b.airborne=false;
+    b.vy=0;b.y=GT-BH;
     if(b.hopT<=0){
       b.face=s.px>b.x?1:-1;
-      const big=Math.random()<0.35;
-      b.vy=big?-820:-520;b.vx=b.face*(big?300:200);b.hopT=big?1.5:0.9;
+      const big=Math.random()<(b.tier>=5?0.5:0.35);
+      b.vy=big?-820:-520;
+      b.vx=b.face*(big?300:200)*(1+0.08*b.tier);
+      b.hopT=(big?1.5:0.9)*(b.tier>=5?0.75:1);
     }else b.vx*=(1-6*dt);
-  }else b.vy+=GRAV*0.85*dt;
+  }else{b.airborne=true;b.vy+=GRAV*0.85*dt;}
+  b.lastVy=b.vy;
   b.x+=b.vx*dt;b.y+=b.vy*dt;
   b.x=Math.max(40,Math.min(s.level.width-BW-40,b.x));
-  if(b.y>460-BH)b.y=460-BH;
+  if(b.y>GT-BH)b.y=GT-BH;
 
-  const pbox={x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},bbox={x:b.x,y:b.y,w:BW,h:BH};
+  // tier 3+: summons minions
+  if(b.tier>=3){
+    b.sumT-=dt;
+    const alive=s.level.enemies.filter(e=>!e.dead&&e.kind==="walker").length;
+    if(b.sumT<=0&&alive<3){
+      b.sumT=7;
+      s.level.enemies.push({kind:"walker",x:b.x+BW/2,y:GT-26,x0:60,x1:s.level.width-60,dir:s.px>b.x?1:-1,spd:90+20*b.tier,dead:false});
+      spawnDust(s,b.x+BW/2,GT,8);
+    }
+  }
+  // tier 4+: spits arcing projectiles at you
+  if(b.tier>=4){
+    b.projT-=dt;
+    if(b.projT<=0){
+      b.projT=b.tier>=5?2.5:4;
+      const dx=s.px-b.x, fl=Math.max(0.7,Math.min(1.6,Math.abs(dx)/400));
+      s.level.projectiles.push({x:b.x+BW/2,y:b.y+30*b.scale,vx:Math.sign(dx||1)*220*fl,vy:-560});
+    }
+  }
+
+  const pbox={x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H};
+  const bbox={x:b.x,y:b.y,w:BW,h:BH};
   if(rectsOverlap(pbox,bbox)){
     const stomping=s.vy>150&&s.py+PLAYER_H<b.y+BH*0.45;
     if(stomping&&b.invuln<=0){
@@ -619,16 +823,141 @@ function draw(s){
   ctx.save();
   ctx.translate(-cx,-cy);
 
+  // fans first (behind everything)
+  for(const f of s.level.fans){
+    if(f.x+f.w<cx-50||f.x>cx+VIEW_W+50)continue;
+    // wind streaks rising through the column
+    for(let i=0;i<6;i++){
+      const wy=f.y+f.h-((s.t*180+i*67)%f.h);
+      ctx.globalAlpha=0.25*(1-(f.y+f.h-wy)/f.h)+0.1;
+      ctx.strokeStyle="#cfefff";ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(f.x+8+((i*23)%(f.w-16)),wy);ctx.lineTo(f.x+8+((i*23)%(f.w-16)),wy-22);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    // fan base
+    ctx.fillStyle="#4a5568";
+    ctx.beginPath();ctx.roundRect(f.x-4,f.y+f.h-12,f.w+8,14,4);ctx.fill();
+    ctx.strokeStyle="#9fb3c8";ctx.lineWidth=3;
+    const spin=s.t*12;
+    ctx.beginPath();ctx.moveTo(f.x+f.w/2-14*Math.cos(spin),f.y+f.h-5);ctx.lineTo(f.x+f.w/2+14*Math.cos(spin),f.y+f.h-5);ctx.stroke();
+  }
   for(const p of s.level.platforms){
-    if(p.x+p.w<cx-50||p.x>cx+VIEW_W+50)continue;
-    ctx.fillStyle=pal.groundDark;ctx.fillRect(p.x,p.y,p.w,p.h);
-    ctx.fillStyle=pal.ground;
-    ctx.beginPath();ctx.roundRect(p.x,p.y,p.w,Math.min(16,p.h),8);ctx.fill();
-    for(let gx=p.x+10;gx<p.x+p.w-6;gx+=34){
+    const px2=p.curX!==undefined?p.curX:p.x, py2=p.curY!==undefined?p.curY:p.y;
+    if(px2+p.w<cx-50||px2>cx+VIEW_W+50)continue;
+    if(p.type==="pad"){
+      const squishP=p.boing>0?1-p.boing*1.2:1;
+      ctx.fillStyle="#7a2d55";
+      ctx.beginPath();ctx.roundRect(px2+8,py2+8,p.w-16,8,3);ctx.fill();
+      ctx.fillStyle="#ff6b9d";
+      ctx.beginPath();ctx.ellipse(px2+p.w/2,py2+6*squishP,p.w/2,9*squishP+3,0,Math.PI,0);ctx.fill();
+      ctx.fillStyle="#ffd0e2";
+      ctx.beginPath();ctx.ellipse(px2+p.w/2-8,py2+2*squishP,7,3,0,Math.PI,0);ctx.fill();
+      continue;
+    }
+    if(p.type==="oneway"){
+      ctx.fillStyle=pal.accent;
+      ctx.globalAlpha=0.85;
+      ctx.beginPath();ctx.roundRect(px2,py2,p.w,p.h,6);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.strokeStyle="rgba(255,255,255,0.5)";ctx.lineWidth=2;ctx.setLineDash([8,6]);
+      ctx.beginPath();ctx.moveTo(px2+4,py2+p.h);ctx.lineTo(px2+p.w-4,py2+p.h);ctx.stroke();
+      ctx.setLineDash([]);
+      continue;
+    }
+    if(p.type==="crumble"){
+      if(p.cState===2){ // gone — faint outline where it will respawn
+        ctx.strokeStyle="rgba(255,255,255,0.15)";ctx.lineWidth=2;ctx.setLineDash([4,6]);
+        ctx.strokeRect(px2,py2,p.w,p.h);ctx.setLineDash([]);
+        continue;
+      }
+      const shake=p.cState===1?Math.sin(s.t*45)*3:0;
+      ctx.fillStyle=p.cState===1?"#8a5a3a":"#6b4a2e";
+      ctx.beginPath();ctx.roundRect(px2+shake,py2,p.w,p.h,5);ctx.fill();
+      ctx.strokeStyle="rgba(0,0,0,0.35)";ctx.lineWidth=2;
       ctx.beginPath();
-      ctx.ellipse(gx,p.y,8,12+4*Math.sin(gx*0.7+s.t*1.5),0,Math.PI,0);
+      ctx.moveTo(px2+shake+p.w*0.3,py2+2);ctx.lineTo(px2+shake+p.w*0.4,py2+p.h-2);
+      ctx.moveTo(px2+shake+p.w*0.7,py2+2);ctx.lineTo(px2+shake+p.w*0.62,py2+p.h-2);
+      ctx.stroke();
+      continue;
+    }
+    if(p.type==="moving"){
+      ctx.fillStyle="#3d4a6b";
+      ctx.beginPath();ctx.roundRect(px2,py2,p.w,p.h,6);ctx.fill();
+      ctx.strokeStyle=pal.glow;ctx.lineWidth=2;ctx.globalAlpha=0.6+0.3*Math.sin(s.t*4);
+      ctx.beginPath();ctx.roundRect(px2+2,py2+2,p.w-4,p.h-4,4);ctx.stroke();
+      ctx.globalAlpha=1;
+      continue;
+    }
+    // ground / float
+    ctx.fillStyle=pal.groundDark;ctx.fillRect(px2,py2,p.w,p.h);
+    ctx.fillStyle=pal.ground;
+    ctx.beginPath();ctx.roundRect(px2,py2,p.w,Math.min(16,p.h),8);ctx.fill();
+    for(let gx=px2+10;gx<px2+p.w-6;gx+=34){
+      ctx.beginPath();
+      ctx.ellipse(gx,py2,8,12+4*Math.sin(gx*0.7+s.t*1.5),0,Math.PI,0);
       ctx.fill();
     }
+  }
+  // enemies
+  for(const e of s.level.enemies){
+    if(e.dead)continue;
+    if(e.kind==="walker"){
+      const step2=Math.sin(s.t*12+e.x)*3;
+      ctx.fillStyle="#d95763";
+      ctx.beginPath();ctx.ellipse(e.x+14,e.y+14,14,12,0,0,7);ctx.fill();
+      ctx.fillStyle="#a23d47";
+      for(let i=0;i<4;i++){
+        ctx.beginPath();
+        ctx.moveTo(e.x+4+i*7,e.y+4);ctx.lineTo(e.x+7+i*7,e.y-5);ctx.lineTo(e.x+10+i*7,e.y+4);
+        ctx.fill();
+      }
+      ctx.fillStyle="#fff";
+      ctx.beginPath();ctx.arc(e.x+14+e.dir*6,e.y+11,4,0,7);ctx.fill();
+      ctx.fillStyle="#221a33";
+      ctx.beginPath();ctx.arc(e.x+14+e.dir*7,e.y+11,2,0,7);ctx.fill();
+      ctx.fillStyle="#7a2d35";
+      ctx.beginPath();ctx.ellipse(e.x+7,e.y+26,5,3+step2*0.4,0,0,7);ctx.fill();
+      ctx.beginPath();ctx.ellipse(e.x+21,e.y+26,5,3-step2*0.4,0,0,7);ctx.fill();
+    }else if(e.kind==="flyer"){
+      const flap=Math.sin(s.t*14+e.ph)*10;
+      ctx.fillStyle="rgba(180,220,255,0.85)";
+      ctx.beginPath();ctx.ellipse(e.x-16,e.y-4,12,5,-0.4-flap*0.03,0,7);ctx.fill();
+      ctx.beginPath();ctx.ellipse(e.x+16,e.y-4,12,5,0.4+flap*0.03,0,7);ctx.fill();
+      ctx.fillStyle="#5b6ee1";
+      ctx.beginPath();ctx.arc(e.x,e.y,11,0,7);ctx.fill();
+      ctx.fillStyle="#fff";
+      ctx.beginPath();ctx.arc(e.x-3,e.y-2,3.5,0,7);ctx.fill();
+      ctx.beginPath();ctx.arc(e.x+5,e.y-2,3.5,0,7);ctx.fill();
+      ctx.fillStyle="#221a33";
+      ctx.beginPath();ctx.arc(e.x-3,e.y-2,1.6,0,7);ctx.fill();
+      ctx.beginPath();ctx.arc(e.x+5,e.y-2,1.6,0,7);ctx.fill();
+    }else{ // jelly
+      const sq=e.squish>0?1-e.squish*1.5:1;
+      const wob=Math.sin(s.t*5+e.x)*0.06;
+      ctx.globalAlpha=0.85;
+      ctx.fillStyle="#8dff6b";
+      ctx.beginPath();ctx.ellipse(e.x,e.y+30-15*sq,22*(2-sq)*(1+wob),15*sq,0,Math.PI,0);ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.fillStyle="#e9ffdf";
+      ctx.beginPath();ctx.ellipse(e.x-8,e.y+30-22*sq,5,3,0,0,7);ctx.fill();
+      ctx.fillStyle="#221a33";
+      ctx.beginPath();ctx.arc(e.x-5,e.y+30-16*sq,2,0,7);ctx.fill();
+      ctx.beginPath();ctx.arc(e.x+5,e.y+30-16*sq,2,0,7);ctx.fill();
+    }
+  }
+  // shockwaves
+  for(const w of s.level.waves){
+    ctx.fillStyle="rgba(255,180,100,0.8)";
+    ctx.beginPath();ctx.ellipse(w.x,458,17,12+4*Math.sin(s.t*20),0,Math.PI,0);ctx.fill();
+    ctx.fillStyle="rgba(255,240,200,0.5)";
+    ctx.beginPath();ctx.ellipse(w.x-w.dir*12,458,10,7,0,Math.PI,0);ctx.fill();
+  }
+  // projectiles
+  for(const pr of s.level.projectiles){
+    ctx.fillStyle="#c78bff";
+    ctx.beginPath();ctx.arc(pr.x,pr.y,10,0,7);ctx.fill();
+    ctx.fillStyle="#fff";
+    ctx.beginPath();ctx.arc(pr.x-3,pr.y-3,3,0,7);ctx.fill();
   }
   for(const sp of s.level.spikes){
     ctx.fillStyle="#e8e3f0";
@@ -723,27 +1052,29 @@ function drawHero(x,y,face,color,squash,vx,t){
 }
 
 function drawBoss(s){
-  const b=s.level.bossState,BW=90,BH=100;
+  const b=s.level.bossState;
   if(b.dead&&b.deathT>1.2)return;
   const flash=b.invuln>0.6&&Math.floor(s.t*16)%2===0;
   const deathFade=b.dead?Math.max(0,1-b.deathT):1;
   ctx.save();
   ctx.globalAlpha=deathFade;
-  const cxb=b.x+BW/2;
+  ctx.translate(b.x,b.y);
+  ctx.scale(b.scale,b.scale);
+  const cxb=45;
   ctx.fillStyle=flash?"#ffffff":"#5b2a6e";
-  ctx.beginPath();ctx.ellipse(cxb,b.y+62,42,40,0,0,7);ctx.fill();
+  ctx.beginPath();ctx.ellipse(cxb,62,42,40,0,0,7);ctx.fill();
   ctx.fillStyle=flash?"#ffffff":"#7a3d92";
-  ctx.beginPath();ctx.arc(cxb,b.y+20,26,0,7);ctx.fill();
+  ctx.beginPath();ctx.arc(cxb,20,26,0,7);ctx.fill();
   ctx.fillStyle="#e8e3f0";
-  ctx.beginPath();ctx.moveTo(cxb-20,b.y+8);ctx.lineTo(cxb-34,b.y-14);ctx.lineTo(cxb-10,b.y+2);ctx.fill();
-  ctx.beginPath();ctx.moveTo(cxb+20,b.y+8);ctx.lineTo(cxb+34,b.y-14);ctx.lineTo(cxb+10,b.y+2);ctx.fill();
+  ctx.beginPath();ctx.moveTo(cxb-20,8);ctx.lineTo(cxb-34,-14);ctx.lineTo(cxb-10,2);ctx.fill();
+  ctx.beginPath();ctx.moveTo(cxb+20,8);ctx.lineTo(cxb+34,-14);ctx.lineTo(cxb+10,2);ctx.fill();
   ctx.fillStyle=flash?"#fff":"#4a2258";
   const fb=Math.sin(s.t*5)*5;
-  ctx.beginPath();ctx.arc(cxb-52,b.y+55+fb,13,0,7);ctx.fill();
-  ctx.beginPath();ctx.arc(cxb+52,b.y+55-fb,13,0,7);ctx.fill();
+  ctx.beginPath();ctx.arc(cxb-52,55+fb,13,0,7);ctx.fill();
+  ctx.beginPath();ctx.arc(cxb+52,55-fb,13,0,7);ctx.fill();
   ctx.fillStyle="#ffd447";
-  ctx.beginPath();ctx.arc(cxb+b.face*8,b.y+16,4.5,0,7);ctx.fill();
-  ctx.beginPath();ctx.arc(cxb+b.face*18,b.y+16,4.5,0,7);ctx.fill();
+  ctx.beginPath();ctx.arc(cxb+b.face*8,16,4.5,0,7);ctx.fill();
+  ctx.beginPath();ctx.arc(cxb+b.face*18,16,4.5,0,7);ctx.fill();
   ctx.restore();
 }
 
