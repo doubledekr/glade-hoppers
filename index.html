@@ -122,6 +122,18 @@
         <div style="color:#8f83b8; font-size:12px; margin-top:14px;">Friends open this same page and enter the code under "Join".<br>Tap the Room chip up top to see this again.</div>
       </div>
     </div>
+    <div class="overlay" id="shopOverlay">
+      <div style="max-width:320px;">
+        <div style="font-size:26px;font-weight:900;color:#ffd447;text-shadow:0 3px 0 #6b4400;">✦ GLADE SHOP ✦</div>
+        <div id="shopBank" style="color:#cbb8ff;font-size:15px;margin:10px 0 4px;"></div>
+        <div id="shopOffer" style="color:#fff;font-size:14px;margin-bottom:16px;line-height:1.5;"></div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button class="btn-gold" id="shopBuyBtn">Buy</button>
+          <button class="btn-ghost" id="shopCloseBtn" style="padding:12px 22px;">Leave</button>
+        </div>
+        <div style="color:#8f83b8;font-size:11px;margin-top:12px;">Purchases upgrade EVERYONE in the room.</div>
+      </div>
+    </div>
     <div class="touchpad" style="left:10px;">
       <button class="tbtn" id="leftBtn">◀</button>
       <button class="tbtn" id="rightBtn">▶</button>
@@ -135,7 +147,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=17; // bump on every upload — players must match to play together
+const GAME_VERSION=18; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -220,13 +232,12 @@ function levelBands(n){
   };
 }
 const BOSS_NAMES=["GLADE TYRANT","BRAMBLE KING","HOLLOW COLOSSUS","STORM WARDEN","THE GLADE ETERNAL"];
+const GIMMICK_TITLES={pads:"Bounce Canyon",crumble:"Crumbling Path",movers:"Shifting Stones",fans:"Windy Heights",horde:"Critter Stampede",spikes:"Spike Alley",jelly:"Jelly Garden",none:""};
 
 // ---------- Level generation ----------
 function generateLevel(roomSeed, levelNum){
   const rand=mulberry32(hashStr(roomSeed+":"+levelNum));
   const B=levelBands(levelNum);
-  const gravMult=B.lowgrav?0.55:1;
-  const palette=B.lowgrav?PALETTES[7]:PALETTES[levelNum%7];
   if(isBossLevel(levelNum)){
     const tier=Math.floor(levelNum/20);
     const scale=1+0.22*(tier-1);
@@ -236,9 +247,41 @@ function generateLevel(roomSeed, levelNum){
       {x:w-380,y:330,w:160,h:20,type:"float"},
       {x:w/2-90,y:240,w:180,h:20,type:"float"}];
     return {boss:true,width:w,platforms:plats,spikes:[],lums:[],enemies:[],fans:[],projectiles:[],waves:[],gravMult:1,
-      spawn:{x:80,y:380},door:null,palette:PALETTES[(2+tier)%7],
+      spawn:{x:80,y:380},door:null,palette:PALETTES[(2+tier)%7],camYmin:-80,camYmax:160,title:"",
       bossState:{x:w-260-60*scale,y:460-100*scale,vx:0,vy:0,hp:2+tier*2,maxHp:2+tier*2,invuln:0,hopT:0.8,dead:false,deathT:0,face:-1,tier,scale,sumT:7,projT:3,airborne:false,lastVy:0}};
   }
+  // archetype: horizontal run, vertical climb, or downward plunge (deterministic per seed+level)
+  const aRoll=rand();
+  let L;
+  if(levelNum>=8&&aRoll<0.18)L=genVertical(rand,levelNum,B,"climb");
+  else if(levelNum>=12&&aRoll<0.32)L=genVertical(rand,levelNum,B,"descent");
+  else L=genRun(rand,levelNum,B);
+  L.palette=B.lowgrav?PALETTES[7]:PALETTES[levelNum%7];
+  return L;
+}
+
+// ----- horizontal run, flavored by a featured gimmick -----
+function genRun(rand,levelNum,B){
+  // pick this level's featured mechanic from what's unlocked
+  const pool=["none"];
+  if(B.pads)pool.push("pads");
+  if(B.crumble)pool.push("crumble");
+  if(B.movers)pool.push("movers");
+  if(B.fans)pool.push("fans");
+  if(B.walkers&&levelNum>=10)pool.push("horde");
+  if(levelNum>=9)pool.push("spikes");
+  if(B.jelly)pool.push("jelly");
+  const gimmick=levelNum<6?"none":pool[Math.floor(rand()*pool.length)];
+  // per-gimmick frequency dials
+  const F={spike:0.20,walker:0.25,flyer:0.35,pad:0.22,fan:0.18,jelly:0.15,over:0.6,vmover:0.2,
+    bridgeMove:0.4,bridgeCrumble:0.3};
+  if(gimmick==="pads"){F.pad=0.65;F.spike=0.1;}
+  if(gimmick==="crumble"){F.bridgeCrumble=0.9;F.bridgeMove=0;F.over=0.75;}
+  if(gimmick==="movers"){F.bridgeMove=0.95;F.vmover=0.5;}
+  if(gimmick==="fans"){F.fan=0.55;F.pad=0.05;}
+  if(gimmick==="horde"){F.walker=0.75;F.flyer=0.6;F.spike=0.05;}
+  if(gimmick==="spikes"){F.spike=0.55;F.walker=0.05;}
+  if(gimmick==="jelly"){F.jelly=0.5;F.pad=0.05;}
   const difficulty=Math.min(1,levelNum/60);
   const width=2600+Math.min(levelNum*80,2600);
   const platforms=[],spikes=[],lums=[],enemies=[],fans=[];
@@ -246,7 +289,6 @@ function generateLevel(roomSeed, levelNum){
   platforms.push({x:0,y:groundY,w:360,h:300,type:"ground"});
   x=360;
   while(x<width-500){
-    // elevation first, then a gap the jump can actually clear (low-grav jumps are much bigger)
     const prevY=groundY;
     const newY=Math.max(260,Math.min(480,groundY+(Math.floor(rand()*5)-2)*TILE));
     const rise=prevY-newY;
@@ -260,44 +302,46 @@ function generateLevel(roomSeed, levelNum){
     const segW=220+rand()*320;
     groundY=newY;
     platforms.push({x,y:groundY,w:segW,h:300,type:"ground"});
-    // bridge over the biggest gaps: static, moving, or crumbling depending on level band
     if(gap>170){
       const lowY=Math.max(prevY,newY);
       const bx=x-gap/2-55, by=lowY-90;
       const r=rand();
-      if(B.movers&&r<0.4){
+      if(B.movers&&r<F.bridgeMove){
         platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:Math.max(10,Math.min(60,gap/2-70)),spd:1.4+rand()*0.8,phase:rand()*6.28});
-      }else if(B.crumble&&r<0.7){
+      }else if(B.crumble&&r<F.bridgeMove+F.bridgeCrumble){
         platforms.push({x:bx,y:by,w:110,h:18,type:"crumble",cState:0,cT:0});
       }else{
         platforms.push({x:bx,y:by,w:110,h:20,type:"float"});
       }
       lums.push({x:x-gap/2,y:by-40,got:false});
-      if(B.flyers&&rand()<0.35)enemies.push({kind:"flyer",x:x-gap/2,y:by-120,bx:x-gap/2,by:by-120,amp:40+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
+      if(B.flyers&&rand()<F.flyer)enemies.push({kind:"flyer",x:x-gap/2,y:by-120,bx:x-gap/2,by:by-120,amp:40+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
     }
-    // spikes (safe margins) OR a patrolling critter — never both on one segment
-    if(segW>320&&rand()<0.20+difficulty*0.3&&x>700){
+    if(segW>320&&rand()<F.spike+difficulty*0.2&&x>700){
       const sw=50+rand()*30;
       const sx=x+100+rand()*(segW-200-sw);
       spikes.push({x:sx,y:groundY,w:sw});
-    }else if(B.walkers&&segW>300&&rand()<0.25+difficulty*0.35&&x>600){
+      if(gimmick==="spikes"&&segW>420&&rand()<0.6){ // spike alley: doubles with a safe island between
+        const sx2=Math.min(x+segW-100-sw,sx+sw+90+rand()*40);
+        if(sx2>sx+sw+80)spikes.push({x:sx2,y:groundY,w:sw});
+      }
+    }else if(B.walkers&&segW>300&&rand()<F.walker+difficulty*0.25&&x>600){
       enemies.push({kind:"walker",x:x+50+rand()*(segW-160),y:groundY-26,x0:x+24,x1:x+segW-24,dir:rand()<0.5?1:-1,spd:60+rand()*50+difficulty*60,dead:false});
+      if(gimmick==="horde"&&segW>430)enemies.push({kind:"walker",x:x+segW-120,y:groundY-26,x0:x+24,x1:x+segW-24,dir:-1,spd:70+rand()*60,dead:false});
     }
-    // overhead platforms: solid or jump-through
-    if(rand()<0.6){
+    if(rand()<F.over){
       const fx=x+rand()*segW*0.6, fy=groundY-110-rand()*50;
-      const ptype=(B.oneway&&rand()<0.5)?"oneway":"float";
-      platforms.push({x:fx,y:fy,w:100+rand()*90,h:ptype==="oneway"?12:20,type:ptype});
+      const ptype=(B.oneway&&rand()<0.5)?"oneway":(gimmick==="crumble"&&B.crumble&&rand()<0.6?"crumble":"float");
+      const p={x:fx,y:fy,w:100+rand()*90,h:ptype==="oneway"?12:ptype==="crumble"?18:20,type:ptype};
+      if(ptype==="crumble"){p.cState=0;p.cT=0;}
+      platforms.push(p);
       if(rand()<0.7)lums.push({x:fx+50,y:fy-40,got:false});
-      // vertical elevator up to a bonus ledge
-      if(B.vmovers&&rand()<0.2){
+      if(B.vmovers&&rand()<F.vmover){
         platforms.push({x:fx+150,y:fy-40,w:90,h:16,type:"moving",ax:false,amp:70,spd:1.1+rand()*0.6,phase:rand()*6.28});
         platforms.push({x:fx+140,y:fy-190,w:120,h:16,type:"float"});
         lums.push({x:fx+200,y:fy-230,got:false});
       }
     }
-    // bounce pad with a lum trail straight up
-    if(B.pads&&rand()<0.22&&segW>240){
+    if(B.pads&&rand()<F.pad&&segW>240){
       const padX=x+60+rand()*(segW-160);
       let clear=true;
       for(const sp of spikes)if(Math.abs(sp.x-padX)<130)clear=false;
@@ -305,18 +349,20 @@ function generateLevel(roomSeed, levelNum){
         platforms.push({x:padX,y:groundY-14,w:56,h:14,type:"pad"});
         lums.push({x:padX+28,y:groundY-190,got:false});
         lums.push({x:padX+28,y:groundY-260,got:false});
+        if(gimmick==="pads"){ // bounce canyon: sky platforms to chain onto
+          platforms.push({x:padX-60+rand()*60,y:groundY-270,w:110,h:12,type:"oneway"});
+          lums.push({x:padX+20,y:groundY-320,got:false});
+        }
       }
     }
-    // fan shaft: updraft column to a high ledge
-    if(B.fans&&rand()<0.18&&segW>300){
+    if(B.fans&&rand()<F.fan&&segW>300){
       const fanX=x+80+rand()*(segW-220);
       fans.push({x:fanX,y:groundY-300,w:70,h:300});
       platforms.push({x:fanX-40,y:groundY-280,w:150,h:18,type:"float"});
       lums.push({x:fanX+35,y:groundY-150,got:false});
       lums.push({x:fanX+35,y:groundY-320,got:false});
     }
-    // bouncy jelly — a living trampoline (harmless, bounces you high)
-    if(B.jelly&&rand()<0.15&&segW>260){
+    if(B.jelly&&rand()<F.jelly&&segW>260){
       const jx=x+segW/2;
       enemies.push({kind:"jelly",x:jx,y:groundY-30,squish:0,dead:false});
       lums.push({x:jx,y:groundY-200,got:false});
@@ -327,8 +373,84 @@ function generateLevel(roomSeed, levelNum){
   }
   platforms.push({x,y:groundY,w:500,h:300,type:"ground"});
   const door={x:x+340,y:groundY-84,w:56,h:84};
-  return {boss:false,width:x+500,platforms,spikes,lums,enemies,fans,projectiles:[],waves:[],gravMult,
-    spawn:{x:60,y:platforms[0].y-100},door,palette,bossState:null};
+  const shop=(levelNum%10===0)?{x:x+180,y:groundY}:null;
+  return {boss:false,width:x+500,platforms,spikes,lums,enemies,fans,projectiles:[],waves:[],gravMult:B.lowgrav?0.55:1,
+    spawn:{x:60,y:platforms[0].y-100},door,shop,palette:null,bossState:null,camYmin:-80,camYmax:160,
+    title:GIMMICK_TITLES[gimmick]||""};
+}
+
+// ----- vertical archetypes: tower climb, or spike-dodging plunge -----
+function genVertical(rand,levelNum,B,mode){
+  const W=960;
+  const floors=10+Math.min(14,Math.floor(levelNum/5));
+  const platforms=[{x:0,y:460,w:W,h:220,type:"ground"}];
+  const spikes=[],lums=[],enemies=[],fans=[];
+  let y=460, cxr=W/2, dir=1;
+  const shelf=[];
+  for(let i=0;i<floors;i++){
+    // choose step height, then a horizontal shift the jump can actually make
+    const dy=B.lowgrav?(100+rand()*120):(60+rand()*90);
+    y-=dy;
+    // decide type first (movers reduce allowed shift by their sway)
+    let type="float";
+    const r=rand();
+    if(B.oneway&&r<0.45)type="oneway";
+    else if(B.crumble&&mode==="climb"&&r<0.58)type="crumble";
+    else if(B.movers&&r<0.72)type="moving";
+    const amp=type==="moving"?34:0;
+    const maxDx=Math.max(40,(B.lowgrav?400:250)-dy*1.35-amp);
+    dir=(cxr<140)?1:(cxr>W-140)?-1:(rand()<0.5?-1:1);
+    cxr=Math.max(90,Math.min(W-90,cxr+dir*(30+rand()*(maxDx-30))));
+    const w=110+rand()*70;
+    const p={x:cxr-w/2,y:Math.round(y),w,h:type==="oneway"?12:18,type};
+    if(type==="moving"){p.ax=true;p.amp=amp;p.spd=1.2+rand()*0.8;p.phase=rand()*6.28;}
+    if(type==="crumble"){p.cState=0;p.cT=0;}
+    platforms.push(p);shelf.push(p);
+    if(rand()<0.6)lums.push({x:cxr,y:y-40,got:false});
+    // plunge hazards: spikes claim one edge of wider shelves (every 3rd shelf stays safe)
+    if(mode==="descent"&&w>140&&i%3!==0&&rand()<0.5&&type!=="moving"){
+      const sw=40+rand()*30;
+      const side=rand()<0.5;
+      spikes.push({x:side?p.x+8:p.x+w-8-sw,y:p.y,w:sw});
+    }
+    if(B.flyers&&rand()<(mode==="descent"?0.32:0.16)&&i>2){
+      enemies.push({kind:"flyer",x:cxr,y:y+70,bx:cxr,by:y+70,amp:30+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
+    }
+    if(B.walkers&&w>150&&type==="float"&&rand()<0.28){
+      enemies.push({kind:"walker",x:p.x+20,y:p.y-26,x0:p.x+6,x1:p.x+w-6,dir:1,spd:50+rand()*40,dead:false});
+    }
+    if(mode==="climb"&&B.fans&&rand()<0.14){
+      fans.push({x:Math.max(10,Math.min(W-70,cxr-30)),y:y-240,w:60,h:240});
+    }
+    if(mode==="climb"&&B.pads&&type==="float"&&rand()<0.15){
+      platforms.push({x:cxr-28,y:p.y-14,w:56,h:14,type:"pad"});
+    }
+  }
+  const top=shelf[shelf.length-1];
+  let door,spawn,varShop=null;
+  if(mode==="climb"){
+    const summitY=top.y-120;
+    const wantShop=(levelNum%10===0);
+    const sw2=wantShop?340:220;
+    const summitX=Math.max(30,Math.min(W-sw2-30,cxr-sw2/2));
+    platforms.push({x:summitX,y:summitY,w:sw2,h:20,type:"float"});
+    door={x:summitX+sw2-100,y:summitY-84,w:56,h:84};
+    if(wantShop)varShop={x:summitX+50,y:summitY};
+    lums.push({x:summitX+40,y:summitY-40,got:false});
+    lums.push({x:summitX+sw2-40,y:summitY-40,got:false});
+    spawn={x:W/2-15,y:360};
+  }else{
+    const perchY=top.y-120;
+    const perchX=Math.max(30,Math.min(W-250,cxr-110));
+    platforms.push({x:perchX,y:perchY,w:220,h:20,type:"float"});
+    spawn={x:perchX+95,y:perchY-100};
+    door={x:W/2-28,y:460-84,w:56,h:84};
+    if(levelNum%10===0)varShop={x:W/2-190,y:460};
+  }
+  const minY=Math.min(...platforms.map(p=>p.y));
+  return {boss:false,width:W,platforms,spikes,lums,enemies,fans,projectiles:[],waves:[],gravMult:B.lowgrav?0.55:1,
+    spawn,door,shop:varShop,palette:null,bossState:null,camYmin:minY-260,camYmax:160,
+    title:mode==="climb"?"The Ascent \u2B06":"The Plunge \u2B07"};
 }
 
 function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
@@ -392,7 +514,7 @@ function leaveRoom(){
     try{chan.detach();}catch(e){}
     chan=null;
   }
-  sendPos=null;sendNextFn=null;
+  sendPos=null;sendNextFn=null;sendBankFn=null;
 }
 
 // ---------- Start game ----------
@@ -404,7 +526,7 @@ function startGame(code,seed,solo){
   G={code,seed,levelNum:1,level,
     px:level.spawn.x,py:level.spawn.y,vx:0,vy:0,
     grounded:false,coyote:0,buffer:0,holdT:0,holding:false,
-    face:1,hearts:3,invuln:0,lumCount:0,
+    face:1,hearts:3,maxHearts:3,seq:0,invuln:0,lumCount:0,
     squash:1,camX:0,camY:0,t:0,others:{},color,name,dust:[]};
   screenState="playing";
   menuEl.style.display="none";
@@ -422,12 +544,18 @@ function startGame(code,seed,solo){
       // wire senders FIRST so nothing below can prevent us broadcasting
       sendPos=(data)=>{chan.publish("pos",data).catch(e=>{lastErr=("pub: "+(e.message||e)).slice(0,120);});};
       sendNextFn=(data)=>{chan.publish("next",data).catch(()=>{});};
+      sendBankFn=(data)=>{chan.publish("bank",data).catch(()=>{});};
+      chan.subscribe("bank",(msg)=>{
+        if(!msg.data||msg.clientId===myId)return;
+        adoptBank(msg.data,msg.data.name);
+      }).catch(()=>{});
       chan.subscribe("pos",(msg)=>{
         if(!G||!msg.data||msg.clientId===myId)return;
         const data=msg.data;
         data.rt=Date.now(); // stamp with OUR clock — sender clocks can be skewed
         G.others[msg.clientId]=data;
         if(data.v!==GAME_VERSION)G.versionMismatch=true;
+        if(typeof data.seq==="number")adoptBank({bank:data.bank,mh:data.mh,seq:data.seq},data.name);
         // fallback catch-up: if a peer is ahead (late join / missed message), jump to them
         if(data.lvl>G.levelNum)goToLevel(G,data.lvl,data.name||"A player");
       }).catch(e=>{lastErr=("sub: "+(e.message||e)).slice(0,120);});
@@ -458,7 +586,7 @@ function broadcastNow(force){
   const now=Date.now();
   if(now-lastNetSend<(force?25:50))return; // instant sends still floor at 25ms so we can't flood
   lastNetSend=now;
-  sendPos({x:Math.round(G.px),y:Math.round(G.py),vx:Math.round(G.vx),vy:Math.round(G.vy),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});
+  sendPos({x:Math.round(G.px),y:Math.round(G.py),vx:Math.round(G.vx),vy:Math.round(G.vy),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION,bank:G.lumCount,mh:G.maxHearts,seq:G.seq});
 }
 setInterval(()=>broadcastNow(false),50);
 
@@ -505,13 +633,56 @@ function touchBtn(code,isDown){
 });
 
 let sendNextFn=null; // broadcast level completion to the room
+let sendBankFn=null; // broadcast shared lum bank / max-hearts state
+
+// ---------- Shop ----------
+function heartCost(mh){return 10+5*(mh-3);} // 10, 15, 20, ...
+function refreshShop(){
+  if(!G)return;
+  $("shopBank").textContent="Team bank: ✦ "+G.lumCount;
+  if(G.maxHearts>=8){
+    $("shopOffer").innerHTML="The whole team is maxed out at 8 hearts. Legends.";
+    $("shopBuyBtn").style.display="none";
+  }else{
+    const c=heartCost(G.maxHearts);
+    $("shopOffer").innerHTML="<b style='color:#ff6b9d'>+1 MAX HEART for every player</b><br>Cost: ✦ "+c+(G.lumCount<c?"<br><span style='color:#ff8fa0'>(need "+(c-G.lumCount)+" more)</span>":"");
+    $("shopBuyBtn").style.display="";
+    $("shopBuyBtn").disabled=G.lumCount<c;
+    $("shopBuyBtn").style.opacity=G.lumCount<c?0.4:1;
+  }
+}
+function openShop(){refreshShop();$("shopOverlay").classList.add("show");}
+$("shopCloseBtn").onclick=()=>$("shopOverlay").classList.remove("show");
+$("shopBuyBtn").onclick=()=>{
+  if(!G)return;
+  const c=heartCost(G.maxHearts);
+  if(G.lumCount<c||G.maxHearts>=8)return;
+  G.lumCount-=c;
+  G.maxHearts+=1;
+  G.hearts=G.maxHearts;
+  G.seq+=1;
+  if(sendBankFn)sendBankFn({bank:G.lumCount,mh:G.maxHearts,seq:G.seq,name:G.name});
+  showBanner("❤ +1 MAX HEART FOR EVERYONE!");
+  refreshShop();
+};
+// adopt newer shared state (from bank events or piggybacked on positions)
+function adoptBank(d,fromName){
+  if(!G||!d||typeof d.seq!=="number"||d.seq<=G.seq)return;
+  const heartsGrew=d.mh>G.maxHearts;
+  G.seq=d.seq;G.lumCount=d.bank;
+  if(heartsGrew){
+    G.maxHearts=d.mh;G.hearts=G.maxHearts;
+    showBanner("❤ "+(fromName||"A teammate")+" bought +1 MAX HEART for the team!");
+  }else G.maxHearts=d.mh;
+  if($("shopOverlay").classList.contains("show"))refreshShop();
+}
 
 // ---------- Update ----------
 function goToLevel(s,n,clearedBy){
   s.levelNum=n;
   s.level=generateLevel(s.seed,n);
   s.px=s.level.spawn.x;s.py=s.level.spawn.y;s.vx=0;s.vy=0;
-  s.hearts=3;s.invuln=1;
+  s.hearts=s.maxHearts;s.invuln=1;
   let lvlText;
   if(isBossLevel(n)){
     const tier=Math.floor(n/20);
@@ -519,7 +690,7 @@ function goToLevel(s,n,clearedBy){
     document.querySelector("#bossBar .label").textContent=bn;
     lvlText="\u2694\uFE0F "+bn+" \u2014 Level "+n;
   }else{
-    lvlText="Level "+n+((s.level.gravMult||1)<1?" \uD83C\uDF19 LOW GRAVITY":"");
+    lvlText="Level "+n+(s.level.title?" \u2014 "+s.level.title:"")+((s.level.gravMult||1)<1?" \uD83C\uDF19 LOW GRAVITY":"");
   }
   showBanner(clearedBy?(clearedBy+" cleared it! \u2192 "+lvlText):lvlText);
 }
@@ -531,7 +702,7 @@ function nextLevel(s){
 function hurt(s,kbDir){
   if(s.invuln>0)return;
   s.hearts-=1;s.invuln=1.3;s.vy=-420;s.vx=320*(kbDir||-s.face);
-  if(s.hearts<=0){s.px=s.level.spawn.x;s.py=s.level.spawn.y;s.vx=0;s.vy=0;s.hearts=3;s.invuln=1.5;}
+  if(s.hearts<=0){s.px=s.level.spawn.x;s.py=s.level.spawn.y;s.vx=0;s.vy=0;s.hearts=s.maxHearts;s.invuln=1.5;}
 }
 function spawnDust(s,x,y,n){
   for(let i=0;i<n;i++)s.dust.push({x,y,vx:(Math.random()-0.5)*260,vy:-Math.random()*220,life:0.35+Math.random()*0.25,r:2+Math.random()*3});
@@ -639,7 +810,7 @@ function update(s,dt){
 
   if(s.py>900){
     s.hearts=Math.max(0,s.hearts-1);
-    if(s.hearts<=0)s.hearts=3;
+    if(s.hearts<=0)s.hearts=s.maxHearts;
     s.px=L.spawn.x;s.py=L.spawn.y;s.vx=0;s.vy=0;s.invuln=1.2;
   }
   for(const sp of L.spikes){
@@ -694,7 +865,16 @@ function update(s,dt){
 
   // lums
   for(const l of L.lums){
-    if(!l.got&&Math.abs(s.px+PLAYER_W/2-l.x)<30&&Math.abs(s.py+PLAYER_H/2-l.y)<34){l.got=true;s.lumCount+=1;}
+    if(!l.got&&Math.abs(s.px+PLAYER_W/2-l.x)<30&&Math.abs(s.py+PLAYER_H/2-l.y)<34){
+      l.got=true;s.lumCount+=1;s.seq+=1;
+      if(sendBankFn)sendBankFn({bank:s.lumCount,mh:s.maxHearts,seq:s.seq,name:s.name});
+    }
+  }
+  // shop stall: walk into it to open (re-opens only after stepping away)
+  if(L.shop){
+    const inZone=rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},{x:L.shop.x-14,y:L.shop.y-96,w:100,h:96});
+    if(inZone&&!s.inShopZone)openShop();
+    s.inShopZone=inZone;
   }
   if(L.door&&rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},L.door))nextLevel(s);
   if(L.boss&&L.bossState)updateBoss(s,dt);
@@ -709,7 +889,7 @@ function update(s,dt){
 
   const targetX=s.px+PLAYER_W/2-VIEW_W/2+s.face*60;
   s.camX+=(Math.max(0,Math.min(L.width-VIEW_W,targetX))-s.camX)*Math.min(1,6*dt);
-  const targetY=Math.max(-80,Math.min(160,s.py-VIEW_H*0.55));
+  const targetY=Math.max(L.camYmin!==undefined?L.camYmin:-80,Math.min(L.camYmax!==undefined?L.camYmax:160,s.py-VIEW_H*0.55));
   s.camY+=(targetY-s.camY)*Math.min(1,4*dt);
 
   // smooth ghost players: predict forward using their velocity (dead reckoning), then chase the prediction
@@ -735,7 +915,10 @@ function updateBoss(s,dt){
   const BW=90*b.scale,BH=100*b.scale,GT=460;
   if(b.dead){
     b.deathT+=dt;
-    if(b.deathT>1.2&&!s.level.door)s.level.door={x:s.level.width/2-28,y:GT-84,w:56,h:84};
+    if(b.deathT>1.2&&!s.level.door){
+      s.level.door={x:s.level.width/2-28,y:GT-84,w:56,h:84};
+      s.level.shop={x:s.level.width/2-190,y:GT};
+    }
     return;
   }
   if(b.invuln>0)b.invuln-=dt;
@@ -1084,7 +1267,7 @@ function updateHud(s,dt){
   hudTick+=dt;
   if(hudTick<0.2)return;
   hudTick=0;
-  statsChip.textContent="Lv "+s.levelNum+" · "+"❤".repeat(Math.max(0,s.hearts))+"♡".repeat(Math.max(0,3-s.hearts))+" · ✦ "+s.lumCount;
+  statsChip.textContent="Lv "+s.levelNum+" · "+"❤".repeat(Math.max(0,s.hearts))+"♡".repeat(Math.max(0,s.maxHearts-s.hearts))+" · ✦ "+s.lumCount;
   if(s.code){
     if(s.versionMismatch){
       roomChip.innerHTML='<span style="color:#ff8fa0">⚠ Version mismatch! Everyone must refresh the page (hold reload / clear cache) — v'+GAME_VERSION+'</span>';
