@@ -135,7 +135,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=12; // bump on every upload — players must match to play together
+const GAME_VERSION=13; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -153,7 +153,7 @@ window.addEventListener("unhandledrejection",e=>{lastErr=String(e.reason&&e.reas
 //   4. Paste it below and re-upload this file
 // Free tier is plenty for playing with friends.
 // ============================================================
-const ABLY_KEY = "f64PNg.4qENrg:_JXqpmIiihGuw-1EBabJUsmgWDmt-iKXrCrwifz3Oaw"; // <-- paste your Ably API key between the quotes
+const ABLY_KEY = "f64PNg.4qENrg:_JXqpmIiihGuw-1EBabJUsmgWDmt-iKXrCrwifz3Oaw"; // Ably root key (pub/sub only, free tier)
 const APP_ID = "glade-hoppers-dm-v1";
 let ably = null;          // Ably realtime connection
 let chan = null;          // active room channel
@@ -359,6 +359,9 @@ function startGame(code,seed,solo){
     try{
       chan=ably.channels.get(APP_ID+":"+code);
       const myId=ably.auth.clientId;
+      // wire senders FIRST so nothing below can prevent us broadcasting
+      sendPos=(data)=>{chan.publish("pos",data).catch(e=>{lastErr=("pub: "+(e.message||e)).slice(0,120);});};
+      sendNextFn=(data)=>{chan.publish("next",data).catch(()=>{});};
       chan.subscribe("pos",(msg)=>{
         if(!G||!msg.data||msg.clientId===myId)return;
         const data=msg.data;
@@ -367,22 +370,20 @@ function startGame(code,seed,solo){
         if(data.v!==GAME_VERSION)G.versionMismatch=true;
         // fallback catch-up: if a peer is ahead (late join / missed message), jump to them
         if(data.lvl>G.levelNum)goToLevel(G,data.lvl,data.name||"A player");
-      });
+      }).catch(e=>{lastErr=("sub: "+(e.message||e)).slice(0,120);});
       chan.subscribe("next",(msg)=>{ // someone cleared a level → whole room advances
         if(!G||!msg.data||msg.clientId===myId)return;
         if(msg.data.n>G.levelNum)goToLevel(G,msg.data.n,msg.data.name||"A player");
-      });
+      }).catch(()=>{});
       // presence = live peer count + instant join/leave
-      chan.presence.subscribe("enter",(m)=>{if(G&&m.clientId!==myId)G.peerCount=(G.peerCount||0)+1;});
+      chan.presence.subscribe("enter",(m)=>{if(G&&m.clientId!==myId)G.peerCount=(G.peerCount||0)+1;}).catch(()=>{});
       chan.presence.subscribe("leave",(m)=>{
         if(G&&m.clientId!==myId){G.peerCount=Math.max(0,(G.peerCount||0)-1);delete G.others[m.clientId];}
-      });
-      chan.presence.enter({name:G.name});
-      chan.presence.get((err,members)=>{ // count whoever's already in the room
-        if(!err&&members&&G)G.peerCount=members.filter(m=>m.clientId!==myId).length;
-      });
-      sendPos=(data)=>{try{chan.publish("pos",data);}catch(e){}};
-      sendNextFn=(data)=>{try{chan.publish("next",data);}catch(e){}};
+      }).catch(()=>{});
+      chan.presence.enter({name:G.name}).catch(e=>{lastErr=("presence: "+(e.message||e)).slice(0,120);});
+      chan.presence.get().then((members)=>{ // count whoever's already in the room
+        if(members&&G)G.peerCount=members.filter(m=>m.clientId!==myId).length;
+      }).catch(()=>{});
     }catch(e){
       roomChip.innerHTML='Room <b>'+code+'</b> <span style="color:#ff8fa0">(connect failed: '+(e.message||e)+')</span>';
     }
