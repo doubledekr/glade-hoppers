@@ -135,7 +135,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=15; // bump on every upload — players must match to play together
+const GAME_VERSION=16; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -390,11 +390,17 @@ function startGame(code,seed,solo){
   }
 }
 
-// position broadcast 20x/sec through Ably's servers
-setInterval(()=>{
+// position broadcast: steady 20x/sec PLUS instant sends the moment movement changes,
+// so a standstill-to-run transition hits the wire immediately instead of waiting for the next tick
+let lastNetSend=0;
+function broadcastNow(force){
   if(screenState!=="playing"||!G||!sendPos)return;
+  const now=Date.now();
+  if(now-lastNetSend<(force?25:50))return; // instant sends still floor at 25ms so we can't flood
+  lastNetSend=now;
   sendPos({x:Math.round(G.px),y:Math.round(G.py),vx:Math.round(G.vx),vy:Math.round(G.vy),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});
-},50);
+}
+setInterval(()=>broadcastNow(false),50);
 
 let bannerTimer=null;
 function showBanner(text){
@@ -524,6 +530,11 @@ function update(s,dt){
   s.dust=s.dust.filter(d=>(d.life-=dt)>0);
   for(const d of s.dust){d.x+=d.vx*dt;d.y+=d.vy*dt;d.vy+=600*dt;}
 
+  // fire an instant network packet the moment movement state changes (start/stop/turn/jump/land)
+  const moveSig=(Math.abs(s.vx)>30?Math.sign(s.vx):0)+","+(s.grounded?1:0);
+  if(s._lastMoveSig!==undefined&&s._lastMoveSig!==moveSig)broadcastNow(true);
+  s._lastMoveSig=moveSig;
+
   const targetX=s.px+PLAYER_W/2-VIEW_W/2+s.face*60;
   s.camX+=(Math.max(0,Math.min(s.level.width-VIEW_W,targetX))-s.camX)*Math.min(1,6*dt);
   const targetY=Math.max(-80,Math.min(160,s.py-VIEW_H*0.55));
@@ -538,7 +549,8 @@ function update(s,dt){
     if(o.dx===undefined||o.dlvl!==o.lvl||Math.abs(o.dx-tx)>400||Math.abs(o.dy-ty)>400){
       o.dx=tx;o.dy=ty;o.dlvl=o.lvl; // snap on first packet, level change, or big teleport
     }else{
-      const k=Math.min(1,20*dt);
+      const err=Math.hypot(tx-o.dx,ty-o.dy);
+      const k=Math.min(1,(8+err*0.15)*dt); // small error = gentle glide, big error = rapid catch-up
       o.dx+=(tx-o.dx)*k;
       o.dy+=(ty-o.dy)*k;
     }
