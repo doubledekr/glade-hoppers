@@ -135,7 +135,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=14; // bump on every upload — players must match to play together
+const GAME_VERSION=15; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -390,11 +390,11 @@ function startGame(code,seed,solo){
   }
 }
 
-// position broadcast ~10x/sec through Ably's servers
+// position broadcast 20x/sec through Ably's servers
 setInterval(()=>{
   if(screenState!=="playing"||!G||!sendPos)return;
-  sendPos({x:Math.round(G.px),y:Math.round(G.py),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});
-},100);
+  sendPos({x:Math.round(G.px),y:Math.round(G.py),vx:Math.round(G.vx),vy:Math.round(G.vy),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});
+},50);
 
 let bannerTimer=null;
 function showBanner(text){
@@ -529,18 +529,20 @@ function update(s,dt){
   const targetY=Math.max(-80,Math.min(160,s.py-VIEW_H*0.55));
   s.camY+=(targetY-s.camY)*Math.min(1,4*dt);
 
-  // smooth ghost players toward their latest network position
+  // smooth ghost players: predict forward using their velocity (dead reckoning), then chase the prediction
   for(const id in s.others){
     const o=s.others[id];
     if(!o)continue;
-    if(o.dx===undefined||o.dlvl!==o.lvl||Math.abs(o.dx-o.x)>400||Math.abs(o.dy-o.y)>400){
-      o.dx=o.x;o.dy=o.y;o.dlvl=o.lvl; // snap on first packet, level change, or big teleport
+    const age=o.rt?Math.min(0.15,(Date.now()-o.rt)/1000):0; // how stale is the last packet (capped)
+    const tx=o.x+(o.vx||0)*age, ty=o.y+(o.vy||0)*age;       // predicted current position
+    if(o.dx===undefined||o.dlvl!==o.lvl||Math.abs(o.dx-tx)>400||Math.abs(o.dy-ty)>400){
+      o.dx=tx;o.dy=ty;o.dlvl=o.lvl; // snap on first packet, level change, or big teleport
     }else{
-      const k=Math.min(1,12*dt);
-      o.dx+=(o.x-o.dx)*k;
-      o.dy+=(o.y-o.dy)*k;
+      const k=Math.min(1,20*dt);
+      o.dx+=(tx-o.dx)*k;
+      o.dy+=(ty-o.dy)*k;
     }
-    o.dvx=(o.x-o.dx)*10; // rough velocity estimate so their run animation plays
+    o.dvx=o.vx||0; // real velocity drives their run animation
   }
 }
 
