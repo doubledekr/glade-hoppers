@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Glade Hoppers</title>
+<script src="https://cdn.jsdelivr.net/npm/ably@2.26.0/build/ably.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; }
@@ -134,68 +135,59 @@
 
 <script>
 "use strict";
-const GAME_VERSION=11; // bump on every upload — players must match to play together
+const GAME_VERSION=12; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
 window.addEventListener("error",e=>{lastErr=(e.message||"error").slice(0,120);});
 window.addEventListener("unhandledrejection",e=>{lastErr=String(e.reason&&e.reason.message||e.reason||"promise error").slice(0,120);});
 // ============================================================
-// MULTIPLAYER: Trystero (peer-to-peer WebRTC) — zero setup.
-// Pinned version + MQTT matchmaking (public brokers), with a
-// nostr fallback. Room code doubles as the level seed.
-// TURN relay included so phones behind carrier NAT can connect.
+// MULTIPLAYER: Ably (server-relayed pub/sub — no P2P, no NAT
+// issues). Every message goes through Ably's servers, so if
+// both phones can load a webpage, they can play together.
+//
+// SETUP (one time, ~3 min, phone-friendly):
+//   1. Sign up free at https://ably.com
+//   2. Dashboard → your app (one is auto-created) → API Keys
+//   3. Copy the Root key (looks like "abcDEF.ghiJKL:secretpart")
+//   4. Paste it below and re-upload this file
+// Free tier is plenty for playing with friends.
 // ============================================================
+const ABLY_KEY = ""; // <-- paste your Ably API key between the quotes
 const APP_ID = "glade-hoppers-dm-v1";
-const TRYSTERO_VER = "0.25.3";
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-    // Free public TURN (Open Relay) — rescues connections when direct P2P is blocked (common on cellular)
-    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"],
-      username: "openrelayproject", credential: "openrelayproject" }
-  ]
-};
-let joinRoomFn = null;   // trystero's joinRoom, loaded below
-let getRelaySocketsFn = null; // diagnostics: are we even reaching the matchmaking relays?
-let mpStrategy = "";
-let room = null;         // active trystero room
-let sendPos = null;      // broadcast action
+let ably = null;          // Ably realtime connection
+let chan = null;          // active room channel
+let sendPos = null;       // (data) => publish position
+let mpConnState = "off"; // off | connecting | connected | failed
 const mpStatusEl = document.getElementById("mpStatus");
-(async function initTrystero() {
-  const candidates = [
-    ["mqtt",  "https://cdn.jsdelivr.net/npm/@trystero-p2p/mqtt@"+TRYSTERO_VER+"/+esm"],
-    ["nostr", "https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@"+TRYSTERO_VER+"/+esm"],
-    ["mqtt-shim",  "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/mqtt/+esm"],
-    ["nostr-shim", "https://cdn.jsdelivr.net/npm/trystero@"+TRYSTERO_VER+"/nostr/+esm"],
-  ];
-  for (const [name, url] of candidates) {
-    try {
-      const mod = await import(url);
-      if (!mod.joinRoom) continue;
-      joinRoomFn = mod.joinRoom;
-      getRelaySocketsFn = mod.getRelaySockets || null;
-      mpStrategy = name;
-      mpStatusEl.innerHTML = '<span class="st-ok">● Multiplayer ready (peer-to-peer via '+name+') — host or join below</span>';
-      return;
-    } catch (e) { lastErr = (e.message||String(e)).slice(0,120); }
+(function initAbly(){
+  if(!ABLY_KEY){
+    mpStatusEl.innerHTML='<span class="st-warn">● Multiplayer off — no Ably key set yet. Solo works. (Setup steps are at the top of this file\'s source.)</span>';
+    return;
   }
-  mpStatusEl.innerHTML = '<span class="st-bad">● Couldn\'t load the multiplayer library ('+lastErr+'). Check your connection, or Play Solo.</span>';
+  if(typeof Ably==="undefined"){
+    mpStatusEl.innerHTML='<span class="st-bad">● Ably SDK failed to load — check your connection.</span>';
+    return;
+  }
+  try{
+    ably=new Ably.Realtime({key:ABLY_KEY,clientId:"p"+Math.random().toString(36).slice(2,9)});
+    mpConnState="connecting";
+    mpStatusEl.innerHTML='<span class="st-dim">⏳ Connecting to multiplayer…</span>';
+    ably.connection.on("connected",()=>{
+      mpConnState="connected";
+      mpStatusEl.innerHTML='<span class="st-ok">● Multiplayer ready (server-relayed) — host or join below</span>';
+    });
+    ably.connection.on("failed",(e)=>{
+      mpConnState="failed";
+      mpStatusEl.innerHTML='<span class="st-bad">● Multiplayer connection failed: '+((e&&e.reason&&e.reason.message)||"unknown")+'. Check the API key.</span>';
+    });
+    ably.connection.on("disconnected",()=>{
+      if(mpConnState==="connected")mpStatusEl.innerHTML='<span class="st-warn">● Multiplayer reconnecting…</span>';
+    });
+  }catch(e){
+    mpStatusEl.innerHTML='<span class="st-bad">● Ably init error: '+(e.message||e)+'</span>';
+  }
 })();
-function relayCount(){
-  if(!getRelaySocketsFn)return -1; // unknown
-  try{
-    const socks=getRelaySocketsFn();
-    return Object.values(socks).filter(ws=>ws&&ws.readyState===1).length;
-  }catch(e){return -1;}
-}
-function relayCount(){
-  if(!getRelaySocketsFn)return -1; // unknown
-  try{
-    const socks=getRelaySocketsFn();
-    return Object.values(socks).filter(ws=>ws&&ws.readyState===1).length;
-  }catch(e){return -1;}
-}
 
 // ---------- Seeded RNG ----------
 function mulberry32(a){return function(){a|=0;a=(a+0x6d2b79f5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -302,7 +294,7 @@ function makeCode(){return Array.from({length:5},()=>"ABCDEFGHJKMNPQRSTUVWXYZ234
 
 $("hostBtn").onclick=()=>{
   menuError.textContent="";
-  if(!joinRoomFn){menuError.textContent="Multiplayer library isn't loaded yet — give it a second or Play Solo.";return;}
+  if(!ably||mpConnState!=="connected"){menuError.textContent=ABLY_KEY?"Multiplayer is still connecting — give it a moment or Play Solo.":"No Ably key set yet — see setup steps in the file source, or Play Solo.";return;}
   const code=makeCode();
   startGame(code,"gh-seed-"+code,false);
   codeBig.textContent=code;
@@ -315,7 +307,7 @@ $("joinBtn").onclick=()=>{
   const code=$("joinInput").value.trim().toUpperCase();
   if(!code){menuError.textContent="Enter a join code first.";return;}
   if(code.length<5){menuError.textContent="Codes are 5 characters — check with your host.";return;}
-  if(!joinRoomFn){menuError.textContent="Multiplayer library isn't loaded yet — give it a second or Play Solo.";return;}
+  if(!ably||mpConnState!=="connected"){menuError.textContent=ABLY_KEY?"Multiplayer is still connecting — give it a moment or Play Solo.":"No Ably key set yet — see setup steps in the file source, or Play Solo.";return;}
   startGame(code,"gh-seed-"+code,false);
 };
 
@@ -334,7 +326,13 @@ $("menuLink").onclick=()=>{
 };
 
 function leaveRoom(){
-  if(room){try{room.leave();}catch(e){}room=null;sendPos=null;sendNext=null;}
+  if(chan){
+    try{chan.presence.leave();}catch(e){}
+    try{chan.unsubscribe();}catch(e){}
+    try{chan.detach();}catch(e){}
+    chan=null;
+  }
+  sendPos=null;sendNextFn=null;
 }
 
 // ---------- Start game ----------
@@ -354,46 +352,47 @@ function startGame(code,seed,solo){
   showBanner("Level 1");
   roomChip.innerHTML=code?('Room <b>'+code+'</b>'):"Solo";
 
-  // multiplayer wiring — peer-to-peer room, code doubles as level seed
+  // multiplayer wiring — server-relayed room via Ably channel
   leaveRoom();
   G.peerCount=0;
-  if(!solo&&joinRoomFn&&code){
+  if(!solo&&ably&&code){
     try{
-      room=joinRoomFn({appId:APP_ID,rtcConfig:RTC_CONFIG},code,{onJoinError:(e)=>{lastErr=("join: "+(e&&e.error||e&&e.message||e)).slice(0,120);}});
-      const [send,get]=room.makeAction("pos");
-      sendPos=send;
-      const [sn,gn]=room.makeAction("next");
-      sendNext=sn;
-      gn((data)=>{ // someone cleared a level → whole room advances
-        if(G&&data&&data.n>G.levelNum)goToLevel(G,data.n,data.name||"A player");
+      chan=ably.channels.get(APP_ID+":"+code);
+      const myId=ably.auth.clientId;
+      chan.subscribe("pos",(msg)=>{
+        if(!G||!msg.data||msg.clientId===myId)return;
+        const data=msg.data;
+        data.rt=Date.now(); // stamp with OUR clock — sender clocks can be skewed
+        G.others[msg.clientId]=data;
+        if(data.v!==GAME_VERSION)G.versionMismatch=true;
+        // fallback catch-up: if a peer is ahead (late join / missed message), jump to them
+        if(data.lvl>G.levelNum)goToLevel(G,data.lvl,data.name||"A player");
       });
-      get((data,peerId)=>{
-        if(G&&data){
-          data.rt=Date.now(); // stamp with OUR clock — sender clocks can be skewed
-          G.others[peerId]=data;
-          if(data.v!==GAME_VERSION)G.versionMismatch=true;
-          // fallback catch-up: if a peer is ahead (late join / missed message), jump to them
-          if(data.lvl>G.levelNum)goToLevel(G,data.lvl,data.name||"A player");
-        }
+      chan.subscribe("next",(msg)=>{ // someone cleared a level → whole room advances
+        if(!G||!msg.data||msg.clientId===myId)return;
+        if(msg.data.n>G.levelNum)goToLevel(G,msg.data.n,msg.data.name||"A player");
       });
-      room.onPeerJoin((peerId)=>{
-        if(G)G.peerCount=(G.peerCount||0)+1;
-        // greet the newcomer immediately so they see us right away
-        if(sendPos&&G)try{sendPos({x:Math.round(G.px),y:Math.round(G.py),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,v:GAME_VERSION},peerId);}catch(e){}
+      // presence = live peer count + instant join/leave
+      chan.presence.subscribe("enter",(m)=>{if(G&&m.clientId!==myId)G.peerCount=(G.peerCount||0)+1;});
+      chan.presence.subscribe("leave",(m)=>{
+        if(G&&m.clientId!==myId){G.peerCount=Math.max(0,(G.peerCount||0)-1);delete G.others[m.clientId];}
       });
-      room.onPeerLeave((peerId)=>{
-        if(G){delete G.others[peerId];G.peerCount=Math.max(0,(G.peerCount||0)-1);}
+      chan.presence.enter({name:G.name});
+      chan.presence.get((err,members)=>{ // count whoever's already in the room
+        if(!err&&members&&G)G.peerCount=members.filter(m=>m.clientId!==myId).length;
       });
+      sendPos=(data)=>{try{chan.publish("pos",data);}catch(e){}};
+      sendNextFn=(data)=>{try{chan.publish("next",data);}catch(e){}};
     }catch(e){
-      roomChip.innerHTML='Room <b>'+code+'</b> <span style="color:#ff8fa0">(P2P failed)</span>';
+      roomChip.innerHTML='Room <b>'+code+'</b> <span style="color:#ff8fa0">(connect failed: '+(e.message||e)+')</span>';
     }
   }
 }
 
-// position broadcast ~10x/sec (peers receive instantly)
+// position broadcast ~10x/sec through Ably's servers
 setInterval(()=>{
   if(screenState!=="playing"||!G||!sendPos)return;
-  try{sendPos({x:Math.round(G.px),y:Math.round(G.py),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});}catch(e){}
+  sendPos({x:Math.round(G.px),y:Math.round(G.py),lvl:G.levelNum,name:G.name,color:G.color,face:G.face,t:Date.now(),v:GAME_VERSION});
 },100);
 
 let bannerTimer=null;
@@ -438,7 +437,7 @@ function touchBtn(code,isDown){
   el.addEventListener("pointercancel",()=>touchBtn(code,false));
 });
 
-let sendNext=null; // broadcast level completion to the room
+let sendNextFn=null; // broadcast level completion to the room
 
 // ---------- Update ----------
 function goToLevel(s,n,clearedBy){
@@ -452,7 +451,7 @@ function goToLevel(s,n,clearedBy){
 function nextLevel(s){
   const n=s.levelNum+1;
   goToLevel(s,n,null);
-  if(sendNext)try{sendNext({n,name:s.name});}catch(e){}
+  if(sendNextFn)sendNextFn({n,name:s.name});
 }
 function hurt(s,kbDir){
   if(s.invuln>0)return;
@@ -737,10 +736,9 @@ function updateHud(s,dt){
     if(pc>0){
       link=' · <span style="color:#8dff6b">🔗 '+(pc+1)+' players</span>';
     }else{
-      const rc=relayCount();
-      if(rc===0)link=' · <span style="color:#ff8fa0">🔗 can\'t reach matchmaking relays — network may block them</span>';
-      else if(rc>0)link=' · <span style="color:#ffb86b">🔗 searching for peers… ('+mpStrategy+', relays: '+rc+' ✓)</span>';
-      else link=' · <span style="color:#ffb86b">🔗 searching for peers… ('+mpStrategy+')</span>';
+      const cs=ably?ably.connection.state:"off";
+      if(cs==="connected")link=' · <span style="color:#ffb86b">🔗 connected — waiting for friends to join…</span>';
+      else link=' · <span style="color:#ff8fa0">🔗 server connection: '+cs+'</span>';
       if(lastErr)link+=' <span style="color:#ff8fa0; font-size:11px">['+lastErr+']</span>';
     }
     roomChip.innerHTML='Room <b>'+s.code+'</b>'+link+(names?(" ·"+names):"");
