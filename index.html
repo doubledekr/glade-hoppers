@@ -64,14 +64,14 @@
   #mpStatus { font-size: 12px; margin-bottom: 14px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.06); line-height: 1.4; }
   .st-ok { color: #8dff6b; } .st-bad { color: #ff8fa0; } .st-warn { color: #ffb86b; } .st-dim { color: #cbb8ff; }
   #menuError { margin-top: 12px; color: #ff8fa0; font-size: 13px; }
-  .touchpad { position: absolute; bottom: 10px; display: flex; gap: 8px; }
+  .touchpad { position: absolute; bottom: 58px; display: flex; gap: 10px; }
   .tbtn {
-    width: 56px; height: 56px; border-radius: 16px; background: rgba(255,255,255,0.15); color: #fff;
-    font-size: 22px; touch-action: none; padding: 0;
+    width: 72px; height: 72px; border-radius: 20px; background: rgba(255,255,255,0.18); color: #fff;
+    font-size: 28px; touch-action: none; padding: 0;
   }
   #jumpBtn {
-    width: 72px; height: 72px; border-radius: 50%; background: rgba(255,212,71,0.85); color: #3a2a00;
-    font-size: 15px; font-weight: 900; touch-action: none; padding: 0;
+    width: 92px; height: 92px; border-radius: 50%; background: rgba(255,212,71,0.88); color: #3a2a00;
+    font-size: 18px; font-weight: 900; touch-action: none; padding: 0;
   }
   #footer { color: #8f83b8; font-size: 12px; margin-top: 8px; text-align: center; }
   #footer a { color: #5ee0ff; cursor: pointer; text-decoration: underline; }
@@ -127,9 +127,9 @@
       <button class="tbtn" id="leftBtn">◀</button>
       <button class="tbtn" id="rightBtn">▶</button>
     </div>
-    <div class="touchpad" style="right:96px; flex-direction:column; gap:6px; display:none;">
-      <button class="tbtn" id="upBtn" style="width:46px;height:33px;font-size:16px;">▲</button>
-      <button class="tbtn" id="downBtn" style="width:46px;height:33px;font-size:16px;">▼</button>
+    <div class="touchpad" style="right:116px; flex-direction:column; gap:8px; display:none;">
+      <button class="tbtn" id="upBtn" style="width:58px;height:42px;font-size:20px;">▲</button>
+      <button class="tbtn" id="downBtn" style="width:58px;height:42px;font-size:20px;">▼</button>
     </div>
     <div class="touchpad" style="right:10px;">
       <button id="jumpBtn">JUMP</button>
@@ -140,7 +140,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=46; // bump on every upload — players must match to play together
+const GAME_VERSION=47; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
