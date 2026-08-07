@@ -140,7 +140,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=38; // bump on every upload — players must match to play together
+const GAME_VERSION=39; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -431,7 +431,7 @@ function genRun(rand,levelNum,B,mount){
   const earlyEase=Math.min(1,0.55+levelNum*0.06); // slows early movers/critters
   if(gimmick==="pads"){F.pad=0.65;F.spike=0.1;}
   if(gimmick==="crumble"){F.bridgeCrumble=0.9;F.bridgeMove=0;F.over=0.75;}
-  if(gimmick==="movers"){F.bridgeMove=0.95;F.vmover=0.5;}
+  if(gimmick==="movers"){F.bridgeMove=0.95;F.vmover=0.5;F.over=0.75;}
   if(gimmick==="fans"){F.fan=0.55;F.pad=0.05;}
   if(gimmick==="horde"){F.walker=0.75;F.flyer=0.6;F.spike=0.05;}
   if(gimmick==="spikes"){F.spike=0.55;F.walker=0.05;}
@@ -462,7 +462,12 @@ function genRun(rand,levelNum,B,mount){
       const bx=x-gap/2-55, by=lowY-90;
       const r=rand();
       if(B.movers&&r<F.bridgeMove){
-        platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:Math.max(10,Math.min(60,gap/2-70)),spd:(1.4+rand()*0.8)*earlyEase,phase:rand()*6.28});
+        if(gimmick==="movers"&&rand()<0.5){
+          // vertical bobbing bridge: ride it up to cross
+          platforms.push({x:bx,y:Math.max(prevY,newY)-60,w:110,h:18,type:"moving",ax:false,amp:Math.min(48,42+gap*0.04),spd:(1.2+rand()*0.6)*earlyEase,phase:rand()*6.28});
+        }else{
+          platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:Math.max(10,Math.min(60,gap/2-70)),spd:(1.4+rand()*0.8)*earlyEase,phase:rand()*6.28});
+        }
       }else if(B.crumble&&r<F.bridgeMove+F.bridgeCrumble){
         platforms.push({x:bx,y:by,w:110,h:18,type:"crumble",cState:0,cT:0});
       }else{
@@ -497,6 +502,11 @@ function genRun(rand,levelNum,B,mount){
       const ptype=(B.oneway&&rand()<0.5)?"oneway":(gimmick==="crumble"&&B.crumble&&rand()<0.6?"crumble":"float");
       const p={x:fx,y:fy,w:100+rand()*90,h:ptype==="oneway"?12:ptype==="crumble"?18:20,type:ptype};
       if(ptype==="crumble"){p.cState=0;p.cT=0;}
+      if(gimmick==="movers"&&ptype==="float"&&rand()<0.65){
+        // elevated stone that rides up and down — landing window shifts with the bob
+        p.type="moving";p.ax=false;p.h=18;
+        p.amp=32+rand()*26;p.spd=(1.0+rand()*0.7)*earlyEase;p.phase=rand()*6.28;
+      }
       platforms.push(p);
       if(rand()<0.7)lums.push({x:fx+50,y:fy-40,got:false});
       if(B.vmovers&&rand()<F.vmover){
