@@ -140,7 +140,7 @@
 
 <script>
 "use strict";
-const GAME_VERSION=39; // bump on every upload — players must match to play together
+const GAME_VERSION=46; // bump on every upload — players must match to play together
 document.querySelector("#menu p").textContent+=" · v"+GAME_VERSION;
 // Surface silent errors on screen (phones have no console)
 let lastErr="";
@@ -311,7 +311,7 @@ function levelBands(n){
   };
 }
 const BOSS_NAMES=["GLADE TYRANT","BRAMBLE KING","HOLLOW COLOSSUS","STORM WARDEN","THE GLADE ETERNAL"];
-const GIMMICK_TITLES={pads:"Bounce Canyon",crumble:"Crumbling Path",movers:"Shifting Stones",fans:"Windy Heights",horde:"Critter Stampede",spikes:"Spike Alley",jelly:"Jelly Garden",blink:"Blink Ruins ⏱",switch:"Switch Fortress 🔘",none:""};
+const GIMMICK_TITLES={water:"Sunken Gardens \ud83c\udf0a",gel:"Sticky Glade \ud83c\udf6f",pads:"Bounce Canyon",crumble:"Crumbling Path",movers:"Shifting Stones",fans:"Windy Heights",horde:"Critter Stampede",spikes:"Spike Alley",jelly:"Jelly Garden",blink:"Blink Ruins ⏱",switch:"Switch Fortress 🔘",none:""};
 
 // ---------- Level generation ----------
 function generateLevel(roomSeed, levelNum){
@@ -332,8 +332,14 @@ function generateLevel(roomSeed, levelNum){
   // archetype roll (deterministic per seed+level); shop levels stay in classic archetypes
   const aRoll=rand();
   const shopLvl=(levelNum%10===0);
+  const FEATL={9:1,10:1,13:1,14:1,16:1,17:1,21:1,22:1,24:1,31:1,32:1}; // showcase levels always run their new mechanic
+  const FLOWL={3:1,5:1,8:1,12:1,15:1,19:1,26:1,33:1,38:1,45:1}; // rush levels: momentum joyrides, dense early
+  const TIDEL={6:1,11:1}; // tide pools: the water joyride, splash-in-swim-out easy
   let L;
-  if(levelNum>=4&&aRoll<0.16)L=genVertical(rand,levelNum,B,"climb");
+  if(TIDEL[levelNum])L=genRun(rand,levelNum,B,null,"tide");
+  else if(FLOWL[levelNum])L=genRun(rand,levelNum,B,null,true);
+  else if(FEATL[levelNum])L=genRun(rand,levelNum,B);
+  else if(levelNum>=4&&aRoll<0.16)L=genVertical(rand,levelNum,B,"climb");
   else if(levelNum>=12&&aRoll<0.28)L=genVertical(rand,levelNum,B,"descent");
   else if(!shopLvl&&levelNum>=14&&aRoll<0.36)L=genSkyfall(rand,levelNum,B);
   else if(!shopLvl&&levelNum>=26&&aRoll<0.43)L=genFlyer(rand,levelNum,B);
@@ -411,7 +417,22 @@ function genFlyer(rand,levelNum,B){
 
 
 // ----- horizontal run, flavored by a featured gimmick -----
-function genRun(rand,levelNum,B,mount){
+const SHAPE_TITLES={zigzag:"Sawtooth Ridge",chimney:"The Chimneys",rim:"Canyon Rim",islands:"Sky Islands"};
+const MOD_SUFFIX={icy:" \u2744",bouncy:" \ud83e\udee7",heavy:" \ud83e\udea8",wind:" \ud83c\udf2c"};
+function composeTitle(mount,shape,gimmick,mod){
+  if(mount==="pug")return "PUG DASH \ud83d\udc36";
+  if(gimmick==="tide")return "TIDE POOLS \ud83c\udf0a";
+  if(gimmick==="flow")return "RUSH RIDGE \u26a1";
+  const parts=[];
+  if(SHAPE_TITLES[shape])parts.push(SHAPE_TITLES[shape]);
+  if(GIMMICK_TITLES[gimmick])parts.push(GIMMICK_TITLES[gimmick]);
+  let t=parts.join(" \u00b7 ");
+  return t+(MOD_SUFFIX[mod]||"");
+}
+function genRun(rand,levelNum,B,mount,flow){
+  const tide=flow==="tide";
+  if(tide)flow=true;
+  if(flow)B=Object.assign({},B,{pads:true,fans:true,jelly:true,oneway:true,movers:B.movers});
   // pick this level's featured mechanic from what's unlocked
   const pool=["none"];
   if(B.pads)pool.push("pads");
@@ -421,13 +442,32 @@ function genRun(rand,levelNum,B,mount){
   if(B.walkers&&levelNum>=10)pool.push("horde");
   if(levelNum>=9)pool.push("spikes");
   if(B.jelly)pool.push("jelly");
+  if(levelNum>=14)pool.push("water");
+  if(levelNum>=17)pool.push("gel");
   if(levelNum>=16)pool.push("blink");
   if(levelNum>=24)pool.push("switch");
-  const gimmick=(levelNum<6||mount)?"none":pool[Math.floor(rand()*pool.length)];
+  let gimmick=(flow)?(tide?"tide":"flow"):((levelNum<6||mount)?"none":pool[(Math.floor(rand()*97)+levelNum*3)%pool.length]);
+  // every new mechanic headlines its own level right after unlocking
+  const FEATURE={9:"spikes",10:"horde",13:"movers",14:"water",16:"blink",17:"gel",21:"pads",22:"crumble",24:"switch",31:"jelly",32:"fans"};
+  if(!mount&&FEATURE[levelNum]&&pool.includes(FEATURE[levelNum]))gimmick=FEATURE[levelNum];
   // per-gimmick frequency dials
   const F={spike:0.20,walker:0.25,flyer:0.35,pad:0.22,fan:0.18,jelly:0.15,over:0.6,vmover:0.2,
     bridgeMove:0.4,bridgeCrumble:0.3};
-  if(levelNum<8){F.over=0.85;F.bridgeMove=0.6;F.spike=0.12;} // early: lots of overheads, moving bridges, few spikes
+  // ---- level SHAPE: the path's architecture, orthogonal to the gimmick ----
+  const SHAPES=["classic"];
+  if(levelNum>=7)SHAPES.push("zigzag");
+  if(levelNum>=11)SHAPES.push("chimney");
+  if(levelNum>=15)SHAPES.push("rim");
+  if(levelNum>=26&&levelNum%10!==0)SHAPES.push("islands");
+  let shape=(mount||levelNum<7||flow)?"classic":SHAPES[(Math.floor(rand()*89)+levelNum*5)%SHAPES.length];
+  if(FEATURE[levelNum])shape="classic"; // showcases keep the stage clear for their mechanic
+  // ---- level MODIFIER: a physics twist over everything ----
+  const MODS=["none","none","none","icy","bouncy","heavy","wind"];
+  const mod=(levelNum>=12&&!mount&&!flow)?MODS[(Math.floor(rand()*83)+levelNum*7)%MODS.length]:"none";
+  const keySpots=[]; // candidate perches for keys, gathered as we build
+  if(flow){F.pad=0.8;F.fan=0.5;F.jelly=0.35;F.spike=0;F.walker=0;F.flyer=0.05;F.over=0.7;F.bridgeMove=0.5;}
+  let boostNext=false;
+  if(levelNum<8&&!flow){F.over=0.85;F.bridgeMove=0.6;F.spike=0.12;} // early: lots of overheads, moving bridges, few spikes
   const earlyEase=Math.min(1,0.55+levelNum*0.06); // slows early movers/critters
   if(gimmick==="pads"){F.pad=0.65;F.spike=0.1;}
   if(gimmick==="crumble"){F.bridgeCrumble=0.9;F.bridgeMove=0;F.over=0.75;}
@@ -438,35 +478,188 @@ function genRun(rand,levelNum,B,mount){
   if(gimmick==="jelly"){F.jelly=0.5;F.pad=0.05;}
   const difficulty=Math.min(1,levelNum/60);
   const width=2600+Math.min(levelNum*80,2600);
-  const platforms=[],spikes=[],lums=[],enemies=[],fans=[],switches=[];
+  const platforms=[],spikes=[],lums=[],enemies=[],fans=[],switches=[],waters=[];
   let x=0, groundY=440+Math.floor(rand()*2)*TILE;
   platforms.push({x:0,y:groundY,w:360,h:300,type:"ground"});
   x=360;
-  while(x<width-500){
+  // level beats: intro (teach) -> build (escalate) -> breather (rest) -> climax (peak) -> finale
+  const beat=(px)=>{
+    const prog=Math.min(1,px/(width-500));
+    if(prog<0.18)return {i:0.15,name:"intro"};
+    if(prog>=0.58&&prog<0.72)return {i:0.1,name:"breather"};
+    if(prog>0.82)return {i:1,name:"climax"};
+    return {i:0.3+0.75*prog,name:"build"};
+  };
+  let demoDone=false;
+  if(shape==="islands"){
+    // sky-island chain: no floor, every landing earned; each hop within the reach envelope
+    let iy=380, prevMover=false;
+    while(x<width-500){
+      const bt=beat(x);
+      const isMover=bt.i>0.4&&rand()<0.3;
+      const dx=((isMover||prevMover)?(84+rand()*30):(110+rand()*60))*(0.7+0.3*bt.i);
+      prevMover=isMover;
+      x+=dx;
+      iy=Math.max(180,Math.min(470,iy+(rand()*160-80)));
+      const iw=88+rand()*70;
+      if(isMover)platforms.push({x,y:iy,w:iw,h:16,type:"moving",ax:rand()<0.6,amp:34,spd:(1.1+rand()*0.6)*earlyEase,phase:rand()*6.28});
+      else platforms.push({x,y:iy,w:iw,h:16,type:"float"});
+      if(rand()<0.65)lums.push({x:x+iw/2,y:iy-42,got:false});
+      if(bt.name==="breather")for(let k=0;k<3;k++)lums.push({x:x+iw/2-30+k*30,y:iy-70,got:false});
+      if(bt.i>0.5&&rand()<0.16)keySpots.push({x:x+iw/2,y:iy-40});
+      if(B.flyers&&bt.i>0.3&&rand()<0.2*bt.i)enemies.push({kind:"flyer",x:x+iw/2,y:iy-110,bx:x+iw/2,by:iy-110,amp:40,spd:2+rand(),ph:rand()*6.28,dead:false});
+      x+=iw;
+    }
+    groundY=440;
+  }
+  while(shape!=="islands"&&x<width-500){
     const prevY=groundY;
-    const newY=Math.max(260,Math.min(480,groundY+(Math.floor(rand()*5)-2)*TILE));
+    let newY;
+    if(shape==="zigzag"){
+      // sawtooth: committed climbs then committed drops
+      const dirZ=Math.floor(x/560)%2===0?-1:1;
+      newY=Math.max(240,Math.min(500,groundY+dirZ*(2+Math.floor(rand()*2))*TILE));
+    }else if(shape==="rim"){
+      newY=Math.max(420,Math.min(500,groundY+(Math.floor(rand()*3)-1)*TILE)); // canyon floor stays low
+    }else if(flow){
+      // downhill flow: terrain rolls downward for speed, pad-boosts reset the altitude
+      if(boostNext){newY=300;}
+      else{
+        newY=Math.max(300,Math.min(500,groundY+(Math.floor(rand()*4)-1)*TILE));
+      }
+    }else{
+      newY=Math.max(260,Math.min(480,groundY+(Math.floor(rand()*5)-2)*TILE));
+    }
     const rise=prevY-newY;
     const pugB=mount==="pug"?60:0;
     let maxGap;
-    if(rise>=80)maxGap=(B.lowgrav?150:90)+pugB*0.5;
+    if(rise>=120)maxGap=(B.lowgrav?110:50)+pugB*0.5;
+    else if(rise>=80)maxGap=(B.lowgrav?150:90)+pugB*0.5;
     else if(rise>=40)maxGap=(B.lowgrav?210:150)+pugB;
     else if(rise<=-40)maxGap=(B.lowgrav?300:230)+pugB;
     else maxGap=(B.lowgrav?260:200)+pugB;
-    const gap=rand()<0.75?(70+rand()*(maxGap-70)*(0.5+0.5*difficulty)):0;
+    const btg=beat(x), gapI=btg.i;
+    let gap=rand()<(tide?0.85:(0.5+0.3*gapI))?(70+rand()*(Math.max(70,maxGap)-70)*(0.5+0.5*difficulty)*(0.55+0.45*gapI)):0;
+    gap=Math.min(gap,maxGap); // steep rises force hops, never leaps
+    if((tide||gimmick==="water")&&gap>0)gap=Math.max(gap,tide?170:145); // pools need room — swimming is the crossing, not jumping
+    if(flow&&boostNext){gap=90;} // boost hop: the pad does the climbing
     x+=gap;
     const segW=220+rand()*320;
     groundY=newY;
     platforms.push({x,y:groundY,w:segW,h:300,type:"ground"});
-    if(gap>170){
+    const segRef=platforms[platforms.length-1];
+    if(flow){
+      if(boostNext){
+        // launch pad on the previous ledge fires you up to this high segment
+        platforms.push({x:x-gap-72,y:prevY-14,w:56,h:14,type:"pad",boing:0});
+        for(let k=0;k<3;k++)lums.push({x:x-gap-44,y:prevY-100-k*90,got:false});
+        boostNext=false;
+      }
+      if(groundY>=480)boostNext=true;
+      // lum river tracing the flow line
+      for(let k=0;k<4;k++)lums.push({x:x+30+k*(segW-60)/4,y:groundY-56-Math.sin(k*1.2+x*0.01)*26,got:false});
+    }
+    const bt=beat(x), I2=bt.i, hazOK=I2>0.2;
+    // CHIMNEY shape: a wall-jump shaft caps some segments — kick between the walls to get over
+    if(shape==="chimney"&&bt.name!=="intro"&&segW>280&&Math.floor(x/900)%2===1&&x+segW<width-700){
+      const H=200+Math.floor(rand()*3)*30; // <=260: three kicks max
+      platforms.push({x:x+segW,y:groundY-H,w:40,h:H,type:"ground"});
+      platforms.push({x:x+segW+130,y:groundY-H+50,w:40,h:H-50,type:"ground"});
+      lums.push({x:x+segW+85,y:groundY-H*0.45,got:false});
+      lums.push({x:x+segW+85,y:groundY-H*0.85,got:false});
+      keySpots.push({x:x+segW+150,y:groundY-H+16});
+      x+=210; // shaft consumes the gap; next ground continues beyond
+    }
+    // RIM shape: an elevated mesa route above the canyon floor, launched by a bounce pad
+    if(shape==="rim"&&bt.name!=="intro"&&segW>340&&Math.floor(x/760)%2===0){
+      const rimY=groundY-230;
+      platforms.push({x:x+40,y:rimY,w:segW-80,h:60,type:"ground"});
+      platforms.push({x:x+70,y:groundY-14,w:48,h:14,type:"pad",boing:0});
+      lums.push({x:x+segW/2,y:rimY-46,got:false});
+      keySpots.push({x:x+segW-140,y:rimY-34});
+    }
+    // INTRO DEMO: showcase this level's featured mechanic once, in a safe spot, with a lum reward
+    if(!demoDone&&bt.name==="intro"&&segW>300&&gimmick!=="none"){
+      demoDone=true;
+      const dx2=x+segW/2;
+      if(gimmick==="movers"){
+        platforms.push({x:dx2-55,y:groundY-90,w:110,h:16,type:"moving",ax:true,amp:55,spd:1.0*earlyEase,phase:0});
+        lums.push({x:dx2,y:groundY-130,got:false});
+      }else if(gimmick==="spikes"){
+        spikes.push({x:dx2-20,y:groundY,w:40});
+        lums.push({x:dx2,y:groundY-95,got:false});
+      }else if(gimmick==="pads"){
+        platforms.push({x:dx2-24,y:groundY-14,w:48,h:14,type:"pad",boing:0});
+        for(let k=0;k<3;k++)lums.push({x:dx2,y:groundY-90-k*55,got:false});
+      }else if(gimmick==="crumble"){
+        platforms.push({x:dx2-50,y:groundY-80,w:100,h:18,type:"crumble",cState:0,cT:0});
+        lums.push({x:dx2,y:groundY-124,got:false});
+      }else if(gimmick==="jelly"){
+        enemies.push({kind:"jelly",x:dx2,y:groundY-30,squish:0,dead:false});
+        lums.push({x:dx2,y:groundY-200,got:false});
+      }else if(gimmick==="fans"){
+        fans.push({x:dx2-35,y:groundY-300,w:70,h:300});
+        for(let k=0;k<3;k++)lums.push({x:dx2,y:groundY-90-k*70,got:false});
+      }else if(gimmick==="blink"){
+        platforms.push({x:dx2-95,y:groundY-80,w:80,h:14,type:"blink",group:0});
+        platforms.push({x:dx2+15,y:groundY-80,w:80,h:14,type:"blink",group:1});
+        lums.push({x:dx2,y:groundY-124,got:false});
+      }else if(gimmick==="switch"){
+        switches.push({x:dx2-70,y:groundY-40,cd:0});
+        platforms.push({x:dx2+30,y:groundY-120,w:30,h:120,type:"gate",needOn:true});
+        lums.push({x:dx2+80,y:groundY-50,got:false});
+        lums.push({x:dx2+110,y:groundY-50,got:false});
+      }else if(gimmick==="horde"){
+        enemies.push({kind:"walker",x:dx2,y:groundY-26,x0:dx2-70,x1:dx2+70,dir:1,spd:50*earlyEase,dead:false});
+        lums.push({x:dx2,y:groundY-95,got:false});
+      }
+    }
+    // SUNKEN GARDENS lake: the breather becomes a long swim with a treasure floor
+    if(gimmick==="water"&&bt.name==="breather"&&segW>340){
+      const lakeY=groundY+120;
+      platforms.push({x:x+40,y:lakeY,w:segW-80,h:300,type:"ground"});
+      waters.push({x:x+46,y:groundY-10,w:segW-92,h:lakeY-(groundY-10)});
+      for(let k=0;k<4;k++)lums.push({x:x+80+k*(segW-160)/3,y:lakeY-30,got:false});
+    }
+    // STICKY GLADE pillars: hanging gel columns you cling-climb to a treasure ledge
+    if(gimmick==="gel"&&shape!=="rim"&&bt.name!=="intro"&&segW>320&&rand()<0.55){
+      const gx3=x+segW/2;
+      platforms.push({x:gx3-20,y:groundY-330,w:40,h:225,type:"ground",mat:"gel"});
+      platforms.push({x:gx3-70,y:groundY-350,w:140,h:16,type:"float"});
+      lums.push({x:gx3-30,y:groundY-390,got:false});
+      lums.push({x:gx3+30,y:groundY-390,got:false});
+      keySpots.push({x:gx3,y:groundY-384});
+    }
+    // gel gimmick: alternate ground segments wear the goo coat
+    if(gimmick==="gel"&&Math.floor(x/700)%2===0){
+      segRef.mat="gel";
+    }
+    // BREATHER: a calm stretch with an arcing lum trail
+    if(bt.name==="breather"&&segW>260&&gimmick!=="water"){
+      for(let k=0;k<4;k++)lums.push({x:x+segW/2-60+k*40,y:groundY-60-Math.sin((k/3)*3.14)*36,got:false});
+    }
+    const poolable=gap>110&&(tide||gimmick==="water"||(levelNum>=20&&gimmick!=="flow"&&rand()<0.22));
+    if(poolable){
+      // the gap becomes a pool: basin floor + water up near the ledges — falling in means swimming, not dying
+      const topY=Math.max(prevY,newY);
+      const basinY=topY+95;
+      platforms.push({x:x-gap-30,y:basinY,w:gap+60,h:300,type:"ground"});
+      waters.push({x:x-gap-14,y:topY-8,w:gap+28,h:basinY-(topY-8)});
+      lums.push({x:x-gap/2,y:topY+40,got:false});
+      if(gap>200)lums.push({x:x-gap/2,y:basinY-24,got:false});
+    }
+    if(gap>170&&!poolable){
       const lowY=Math.max(prevY,newY);
       const bx=x-gap/2-55, by=lowY-90;
       const r=rand();
       if(B.movers&&r<F.bridgeMove){
         if(gimmick==="movers"&&rand()<0.5){
           // vertical bobbing bridge: ride it up to cross
-          platforms.push({x:bx,y:Math.max(prevY,newY)-60,w:110,h:18,type:"moving",ax:false,amp:Math.min(48,42+gap*0.04),spd:(1.2+rand()*0.6)*earlyEase,phase:rand()*6.28});
+          platforms.push({x:bx,y:Math.max(prevY,newY)-(levelNum<25?60:100),w:110,h:18,type:"moving",ax:false,amp:Math.min(48,42+gap*0.04),spd:(1.2+rand()*0.6)*earlyEase,phase:rand()*6.28});
         }else{
-          platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:Math.max(10,Math.min(60,gap/2-70)),spd:(1.4+rand()*0.8)*earlyEase,phase:rand()*6.28});
+          const FLAT_REACH=205;
+        const ampCap=levelNum<20?Math.max(12,Math.min(60,FLAT_REACH-gap/2)):Math.max(10,Math.min(60,gap/2-70));
+        platforms.push({x:bx,y:by,w:110,h:18,type:"moving",ax:true,amp:ampCap,spd:(1.4+rand()*0.8)*earlyEase,phase:rand()*6.28});
         }
       }else if(B.crumble&&r<F.bridgeMove+F.bridgeCrumble){
         platforms.push({x:bx,y:by,w:110,h:18,type:"crumble",cState:0,cT:0});
@@ -474,9 +667,9 @@ function genRun(rand,levelNum,B,mount){
         platforms.push({x:bx,y:by,w:110,h:20,type:"float"});
       }
       lums.push({x:x-gap/2,y:by-40,got:false});
-      if(B.flyers&&rand()<F.flyer)enemies.push({kind:"flyer",x:x-gap/2,y:by-120,bx:x-gap/2,by:by-120,amp:40+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
+      if(hazOK&&B.flyers&&rand()<F.flyer*Math.min(1,I2*1.35))enemies.push({kind:"flyer",x:x-gap/2,y:by-120,bx:x-gap/2,by:by-120,amp:40+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
     }
-    if(segW>320&&rand()<F.spike+difficulty*0.2&&x>700){
+    if(hazOK&&!flow&&segW>320&&rand()<(F.spike+difficulty*0.2)*Math.min(1,I2*1.35)&&x>700){
       const sw=50+rand()*30;
       const sx=x+100+rand()*(segW-200-sw);
       spikes.push({x:sx,y:groundY,w:sw});
@@ -484,12 +677,16 @@ function genRun(rand,levelNum,B,mount){
         const sx2=Math.min(x+segW-100-sw,sx+sw+90+rand()*40);
         if(sx2>sx+sw+80)spikes.push({x:sx2,y:groundY,w:sw});
       }
-    }else if(B.walkers&&segW>300&&rand()<F.walker+difficulty*0.25&&x>600){
+    }else if(hazOK&&!flow&&levelNum>=14&&segW>340&&rand()<0.14*I2&&x>800){
+      enemies.push({kind:"charger",x:x+segW/2,y:groundY-26,x0:x+30,x1:x+segW-60,state:0,tel:0,cool:0,vx2:0,dead:false});
+    }else if(hazOK&&!flow&&levelNum>=18&&segW>300&&rand()<0.12*I2&&x>800){
+      enemies.push({kind:"hopper",x:x+segW/2,y:groundY-26,baseY:groundY-26,x0:x+30,x1:x+segW-56,vy2:0,hopT:1,grounded2:true,dead:false});
+    }else if(hazOK&&!flow&&B.walkers&&segW>300&&rand()<(F.walker+difficulty*0.25)*Math.min(1,I2*1.35)&&x>600){
       enemies.push({kind:"walker",x:x+50+rand()*(segW-160),y:groundY-26,x0:x+24,x1:x+segW-24,dir:rand()<0.5?1:-1,spd:(60+rand()*50+difficulty*60)*earlyEase,dead:false});
       if(gimmick==="horde"&&segW>430)enemies.push({kind:"walker",x:x+segW-120,y:groundY-26,x0:x+24,x1:x+segW-24,dir:-1,spd:70+rand()*60,dead:false});
     }
     // high road: a 2-step ladder to an elevated route (vertical play on ordinary segments)
-    if(B.oneway&&segW>300&&rand()<(levelNum<10?0.4:0.25)){
+    if(B.oneway&&segW>300&&bt.name!=="climax"&&rand()<(levelNum<10?0.4:0.25)){
       const hx2=x+40+rand()*(segW-260);
       platforms.push({x:hx2,y:groundY-85,w:80,h:12,type:"oneway"});
       platforms.push({x:hx2+95,y:groundY-165,w:80,h:12,type:"oneway"});
@@ -561,15 +758,23 @@ function genRun(rand,levelNum,B,mount){
     x+=segW;
   }
   platforms.push({x,y:groundY,w:500,h:300,type:"ground"});
-  // finale pedestal: two hop-up steps to a raised door platform
-  platforms.push({x:x+170,y:groundY-78,w:85,h:12,type:"oneway"});
-  platforms.push({x:x+285,y:groundY-156,w:200,h:20,type:"float"});
-  lums.push({x:x+212,y:groundY-118,got:false});
-  const door={x:x+360,y:groundY-156-84,w:56,h:84};
+  // KEYS: shaped levels and later classics lock the door behind exploration
+  const keys=[];
+  const wantKeys=flow?0:((shape==="rim"||shape==="chimney")?2:(shape==="islands"?1:((levelNum>=13&&rand()<0.3)?2:0)));
+  if(wantKeys>0&&keySpots.length){
+    keySpots.sort((a,b)=>a.x-b.x);
+    const stride=Math.max(1,Math.floor(keySpots.length/wantKeys));
+    for(let k=0;k<keySpots.length&&keys.length<wantKeys;k+=stride)keys.push({x:keySpots[k].x,y:keySpots[k].y,got:false});
+  }
+  // finale pedestal: gentle overlapping hop-ups to the door platform
+  platforms.push({x:x+150,y:groundY-70,w:115,h:12,type:"oneway"});
+  platforms.push({x:x+255,y:groundY-140,w:230,h:20,type:"float"});
+  lums.push({x:x+205,y:groundY-108,got:false});
+  const door={x:x+350,y:groundY-140-84,w:56,h:84};
   const shop=(levelNum%10===0)?{x:x+60,y:groundY}:null;
   return {boss:false,width:x+500,platforms,spikes,lums,enemies,fans,projectiles:[],waves:[],gravMult:B.lowgrav?0.55:1,
-    spawn:{x:60,y:platforms[0].y-100},door,shop,switches,switchOn:false,palette:null,bossState:null,camYmin:-80,camYmax:160,
-    mount:mount||null,title:mount==="pug"?"PUG DASH 🐶":(GIMMICK_TITLES[gimmick]||"")};
+    spawn:{x:60,y:platforms[0].y-100},door,shop,switches,switchOn:false,keys,mod,shape,waters,palette:null,bossState:null,camYmin:shape==="rim"||shape==="chimney"?-160:-80,camYmax:160,
+    mount:mount||null,title:composeTitle(mount,shape,gimmick,mod)};
 }
 
 // ----- vertical archetypes: tower climb, or spike-dodging plunge -----
@@ -580,36 +785,40 @@ function genVertical(rand,levelNum,B,mode){
   const spikes=[],lums=[],enemies=[],fans=[];
   let y=460, cxr=W/2, dir=1;
   const shelf=[];
+  const restFloor=Math.floor(floors*0.62);
   for(let i=0;i<floors;i++){
+    const vprog=i/Math.max(1,floors-1);
     // choose step height, then a horizontal shift the jump can actually make
     const dy=B.lowgrav?(100+rand()*120):(60+rand()*90);
     y-=dy;
     // decide type first (movers reduce allowed shift by their sway)
     let type="float";
     const r=rand();
-    if(B.oneway&&r<0.45)type="oneway";
-    else if(B.crumble&&mode==="climb"&&r<0.58)type="crumble";
-    else if(B.movers&&r<0.72)type="moving";
+    if(i===restFloor)type="float"; // the rest ledge is always solid and still
+    else if(B.oneway&&r<0.45)type="oneway";
+    else if(B.crumble&&mode==="climb"&&r<0.28+0.4*vprog)type="crumble";
+    else if(B.movers&&r<0.35+0.45*vprog)type="moving";
     const amp=type==="moving"?34:0;
     const maxDx=Math.max(40,(B.lowgrav?400:250)-dy*1.35-amp);
     dir=(cxr<140)?1:(cxr>W-140)?-1:(rand()<0.5?-1:1);
     cxr=Math.max(90,Math.min(W-90,cxr+dir*(30+rand()*(maxDx-30))));
-    const w=110+rand()*70;
+    let w=(110+rand()*70)*(i===restFloor?1.6:(1.12-0.24*vprog)); // wide footing early, tighter near the top, roomy rest ledge
     const p={x:cxr-w/2,y:Math.round(y),w,h:type==="oneway"?12:18,type};
     if(type==="moving"){p.ax=true;p.amp=amp;p.spd=1.2+rand()*0.8;p.phase=rand()*6.28;}
     if(type==="crumble"){p.cState=0;p.cT=0;}
     platforms.push(p);shelf.push(p);
-    if(rand()<0.6)lums.push({x:cxr,y:y-40,got:false});
+    if(i===restFloor){for(let k=0;k<3;k++)lums.push({x:cxr-36+k*36,y:y-46,got:false});}
+    else if(rand()<0.6)lums.push({x:cxr,y:y-40,got:false});
     // plunge hazards: spikes claim one edge of wider shelves (every 3rd shelf stays safe)
     if(mode==="descent"&&w>140&&i%3!==0&&rand()<0.5&&type!=="moving"){
       const sw=40+rand()*30;
       const side=rand()<0.5;
       spikes.push({x:side?p.x+8:p.x+w-8-sw,y:p.y,w:sw});
     }
-    if(B.flyers&&rand()<(mode==="descent"?0.32:0.16)&&i>2){
+    if(B.flyers&&i!==restFloor&&rand()<(mode==="descent"?0.32:0.16)*(0.5+0.7*vprog)&&i>2){
       enemies.push({kind:"flyer",x:cxr,y:y+70,bx:cxr,by:y+70,amp:30+rand()*30,spd:2+rand(),ph:rand()*6.28,dead:false});
     }
-    if(B.walkers&&w>150&&type==="float"&&rand()<0.28){
+    if(B.walkers&&i!==restFloor&&w>150&&type==="float"&&rand()<0.28*(0.5+0.7*vprog)){
       enemies.push({kind:"walker",x:p.x+20,y:p.y-26,x0:p.x+6,x1:p.x+w-6,dir:1,spd:50+rand()*40,dead:false});
     }
     if(mode==="climb"&&B.fans&&rand()<0.14){
@@ -866,6 +1075,9 @@ const SFX={
   wave:()=>tone(90,50,0.3,"sawtooth",0.12),
   crumble:()=>tone(300,120,0.2,"square",0.05),
   tick:()=>tone(1150,1500,0.05,"sine",0.05),
+  splash:()=>{tone(520,140,0.28,"sine",0.14);tone(880,300,0.12,"triangle",0.06);},
+  stroke:()=>tone(300,420,0.09,"sine",0.07),
+  squelch:()=>tone(140,80,0.14,"square",0.07),
 };
 // browsers require a user gesture before audio can start
 window.addEventListener("pointerdown",()=>{const c=ac();if(c&&c.state==="suspended")c.resume();},{once:false});
@@ -1012,12 +1224,13 @@ function update(s,dt){
 
   // --- horizontal movement ---
   const left=keys["ArrowLeft"]||keys["KeyA"], right=keys["ArrowRight"]||keys["KeyD"];
-  const runMax=L.mount==="pug"?500:RUN_MAX, runAcc=L.mount==="pug"?4400:RUN_ACCEL;
+  const onGel=s.grounded&&s.ride&&s.ride.mat==="gel";
+  const runMax=(L.mount==="pug"?500:RUN_MAX)*(onGel?0.5:1), runAcc=(L.mount==="pug"?4400:RUN_ACCEL)*(onGel?0.7:1);
   const ctrl=s.grounded?1:AIR_CONTROL;
   const lockF=(s.wjLock||0)>0?0.15:1;
   if(right&&!left){s.vx+=runAcc*ctrl*lockF*dt;s.face=1;}
   else if(left&&!right){s.vx-=runAcc*ctrl*lockF*dt;s.face=-1;}
-  else if(s.grounded){const f=GROUND_FRICTION*dt;if(Math.abs(s.vx)<=f)s.vx=0;else s.vx-=Math.sign(s.vx)*f;}
+  else if(s.grounded){const f=GROUND_FRICTION*(L.mod==="icy"?0.12:1)*dt;if(Math.abs(s.vx)<=f)s.vx=0;else s.vx-=Math.sign(s.vx)*f;}
   else s.vx*=(1-0.6*dt);
   s.vx=Math.max(-runMax,Math.min(runMax,s.vx));
   if(L.mount==="pug"&&s.grounded&&Math.abs(s.vx)>350&&Math.random()<0.3)spawnDust(s,s.px+PLAYER_W/2-s.face*14,s.py+PLAYER_H,1);
@@ -1025,8 +1238,15 @@ function update(s,dt){
   // --- jump: buffer + coyote + variable height ---
   if(s.buffer>0)s.buffer-=dt;
   if(s.grounded)s.coyote=COYOTE;else if(s.coyote>0)s.coyote-=dt;
-  const jm=L.mount==="pug"?1.16:1;
-  if(s.buffer>0&&s.coyote>0){
+  const jm=(L.mount==="pug"?1.16:1)*(L.mod==="heavy"?1.08:1)*((s.grounded&&s.ride&&s.ride.mat==="gel")?0.85:1);
+  if(s.inWater&&s.buffer>0){
+    // swim stroke: repeatable; near the surface it becomes a leap out
+    const nearTop=s.py<s.inWater.y+26;
+    s.vy=nearTop?-450:-295;
+    s.buffer=0;s.holdT=MAX_HOLD;s.squash=1.15;
+    SFX.stroke();
+    for(let i=0;i<3;i++)s.dust.push({x:s.px+PLAYER_W/2,y:s.py+PLAYER_H,vx:(Math.random()-0.5)*80,vy:60,life:0.35,r:1.8});
+  }else if(s.buffer>0&&s.coyote>0){
     s.vy=JUMP_VEL*jm*(s.gflip||1);s.holdT=0;s.buffer=0;s.coyote=0;s.grounded=false;s.squash=1.25;
     spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,6);SFX.jump();
   }else if(s.buffer>0&&!s.grounded&&(s.wallT||0)>0){
@@ -1038,12 +1258,28 @@ function update(s,dt){
     spawnDust(s,s.px+(s.wallDir>0?PLAYER_W:0),s.py+PLAYER_H*0.6,7);
     SFX.jump();
   }
-  let g=GRAV*GM;
+  // water: buoyant, dragged, stroke-to-swim
+  const wasWater=s.inWater;
+  s.inWater=false;
+  if(L.waters)for(const w2 of L.waters){
+    if(s.px+PLAYER_W/2>w2.x&&s.px+PLAYER_W/2<w2.x+w2.w&&s.py+PLAYER_H*0.6>w2.y&&s.py<w2.y+w2.h){s.inWater=w2;break;}
+  }
+  if(s.inWater&&!wasWater&&s.vy>160){
+    SFX.splash();s.shake=Math.max(s.shake||0,2);
+    for(let i=0;i<10;i++)s.dust.push({x:s.px+PLAYER_W/2,y:s.inWater.y,vx:(Math.random()-0.5)*280,vy:-Math.random()*260,life:0.4,r:2.5+Math.random()*2});
+  }
+  if(!s.inWater&&wasWater&&s.vy<0){
+    for(let i=0;i<6;i++)s.dust.push({x:s.px+PLAYER_W/2,y:s.py+PLAYER_H,vx:(Math.random()-0.5)*180,vy:Math.random()*80,life:0.3,r:2});
+  }
+  if(L.mod==="wind"){s.vx+=55*dt;if(Math.random()<0.05)s.dust.push({x:s.px+Math.random()*30,y:s.py+Math.random()*40,vx:120,vy:-20,life:0.3,r:1.5});}
+  let g=GRAV*GM*(L.mod==="heavy"?1.2:1);
   const rising=s.vy*(s.gflip||1)<0;
   if(rising&&s.holding&&s.holdT<MAX_HOLD){g*=HOLD_GRAV_MULT;s.holdT+=dt;}
   else if(Math.abs(s.vy)<APEX_WINDOW&&!s.grounded)g*=APEX_MULT;
+  if(s.inWater){g*=0.2;s.vx*=(1-2.6*dt);s.vy*=(1-2.2*dt);}
   s.vy+=g*(s.gflip||1)*dt;
-  s.vy=Math.max(-1100,Math.min(1100,s.vy));
+  if(s.inWater)s.vy=Math.max(-320,Math.min(230,s.vy));
+  else s.vy=Math.max(-1100,Math.min(1100,s.vy));
 
   // fans: strong updraft inside the column
   for(const f of L.fans){
@@ -1090,6 +1326,11 @@ function update(s,dt){
       continue;
     }
     if(s.vy>0){
+      if(L.mod==="bouncy"&&s.vy>420&&p.type!=="pad"){
+        s.py=R.y-PLAYER_H;s.vy=-s.vy*0.42;s.squash=1.35;s.grounded=false;
+        spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,4);SFX.jelly();
+        continue;
+      }
       if(p.type==="pad"){
         if(prevBottom<=R.y+10){ // bounce!
           s.py=R.y-PLAYER_H;
@@ -1101,7 +1342,8 @@ function update(s,dt){
       }
       s.py=R.y-PLAYER_H;s.grounded=true;s.ride=p;
       if(p.type==="crumble"&&p.cState===0){p.cState=1;p.cT=0.7;SFX.crumble();}
-      if(!wasGrounded&&s.vy>500){s.squash=0.6;spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,8);s.shake=Math.max(s.shake||0,s.vy>800?3:1.5);}
+      if(!wasGrounded&&s.vy>300&&p.mat==="gel"){SFX.squelch();s.squash=0.5;spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,5);}
+      else if(!wasGrounded&&s.vy>500){s.squash=0.6;spawnDust(s,s.px+PLAYER_W/2,s.py+PLAYER_H,8);s.shake=Math.max(s.shake||0,s.vy>800?3:1.5);}
       s.vy=0;
     }else if(s.vy<0&&p.type!=="oneway"&&p.type!=="pad"){s.py=R.y+R.h;s.vy=0;s.holdT=MAX_HOLD;}
   }
@@ -1116,14 +1358,15 @@ function update(s,dt){
       if(p.type==="crumble"&&p.cState===2)continue;
       if((p.type==="blink"||p.type==="gate")&&!p.on)continue;
       const R={x:p.curX,y:p.curY,w:p.w,h:p.h};
-      if(rectsOverlap(probeR,R)){wd=1;break;}
-      if(rectsOverlap(probeL,R)){wd=-1;break;}
+      if(rectsOverlap(probeR,R)){wd=1;s._wallGel=p.mat==="gel";break;}
+      if(rectsOverlap(probeL,R)){wd=-1;s._wallGel=p.mat==="gel";break;}
     }
     if(wd){
-      s.wallDir=wd;s.wallT=0.12;
+      s.wallDir=wd;s.wallT=s._wallGel?0.22:0.12;
       // wall slide: hugging the wall slows your fall
-      if(s.vy*(s.gflip||1)>150){
-        s.vy=150*(s.gflip||1);
+      const slideCap=s._wallGel?14:150; // gel: you STICK
+      if(s.vy*(s.gflip||1)>slideCap){
+        s.vy=slideCap*(s.gflip||1);
         if(Math.random()<0.3)spawnDust(s,s.px+(wd>0?PLAYER_W:0),s.py+PLAYER_H*0.7,1);
       }
     }
@@ -1150,7 +1393,50 @@ function update(s,dt){
   for(const e of L.enemies){
     if(e.dead)continue;
     let R;
+    if(e.kind==="charger"){
+      if(e.state===2){e.cool-=dt;if(e.cool<=0)e.state=0;}
+      else if(e.state===1){
+        e.tel-=dt;
+        if(e.tel<=0){e.state=3;e.vx2=(s.px>e.x?1:-1)*430;}
+      }else if(e.state===3){
+        e.x+=e.vx2*dt;
+        if(Math.random()<0.4)s.dust.push({x:e.x+14,y:e.y+26,vx:-e.vx2*0.2,vy:-30,life:0.25,r:2});
+        if(e.x<e.x0||e.x>e.x1){e.x=Math.max(e.x0,Math.min(e.x1,e.x));e.state=2;e.cool=1.1;}
+      }else{
+        // idle: spot the player on your level
+        if(Math.abs(s.py-e.y)<70&&Math.abs(s.px-e.x)<360&&s.px>e.x0-40&&s.px<e.x1+40){e.state=1;e.tel=0.45;SFX.tick();}
+      }
+      const pr={x:s.px+4,y:s.py+6,w:PLAYER_W-8,h:PLAYER_H-6};
+      if(rectsOverlap(pr,{x:e.x,y:e.y,w:30,h:26})){
+        if(s.vy>140&&s.py+PLAYER_H<e.y+18){e.dead=true;s.vy=-420;SFX.stomp();addFloatText(s,e.x,e.y-16,"BONK!");spawnLumAt(s,e.x+14,e.y);}
+        else hurt(s);
+      }
+      continue;
+    }
+    if(e.kind==="hopper"){
+      e.vy2=(e.vy2||0)+1500*dt;
+      e.y+=e.vy2*dt;
+      if(e.y>=e.baseY){e.y=e.baseY;e.vy2=0;e.grounded2=true;}
+      e.hopT=(e.hopT||0)-dt;
+      if(e.grounded2&&e.hopT<=0){
+        e.grounded2=false;e.hopT=1.4+Math.random()*0.5;
+        e.vy2=-520;
+        e.vx2=(s.px>e.x?1:-1)*90;
+        SFX.tick();
+      }
+      if(!e.grounded2)e.x=Math.max(e.x0,Math.min(e.x1,e.x+(e.vx2||0)*dt));
+      const pr2={x:s.px+4,y:s.py+6,w:PLAYER_W-8,h:PLAYER_H-6};
+      if(rectsOverlap(pr2,{x:e.x,y:e.y,w:26,h:26})){
+        if(s.vy>140&&s.py+PLAYER_H<e.y+16){e.dead=true;s.vy=-420;SFX.stomp();spawnLumAt(s,e.x+13,e.y);}
+        else hurt(s);
+      }
+      continue;
+    }
     if(e.kind==="walker"){
+      if(s.levelNum<=9&&!s._stompHint&&Math.abs(e.x-s.px)<250&&Math.abs(e.y-s.py)<120){
+        s._stompHint=true;
+        addFloatText(s,e.x+14,e.y-46,"JUMP ON IT! \ud83e\uddb6");
+      }
       e.x+=e.dir*e.spd*dt;
       if(e.x<e.x0){e.x=e.x0;e.dir=1;}
       if(e.x>e.x1-28){e.x=e.x1-28;e.dir=-1;}
@@ -1224,7 +1510,24 @@ function update(s,dt){
       if(changed&&sendBankFn)sendBankFn({bank:s.lumCount,mh:s.maxHearts,pg:s.shopProg,seq:s.seq,name:s.name});
     }else s.shopTick=0;
   }
-  if(L.door&&rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},L.door))nextLevel(s);
+  if(L.keys)for(const k of L.keys){
+    if(!k.got&&Math.abs(s.px+PLAYER_W/2-k.x)<26&&Math.abs(s.py+PLAYER_H/2-k.y)<30){
+      k.got=true;SFX.buy();s.shake=Math.max(s.shake||0,2);
+      spawnDust(s,k.x,k.y,8);
+      const left=L.keys.filter(q=>!q.got).length;
+      addFloatText(s,k.x,k.y-26,left?("\ud83d\udd11 KEY! "+left+" MORE"):"\ud83d\udd11 DOOR UNLOCKED!");
+    }
+  }
+  if(L.door&&rectsOverlap({x:s.px,y:s.py,w:PLAYER_W,h:PLAYER_H},L.door)){
+    const locked=L.keys&&L.keys.some(k=>!k.got);
+    if(locked){
+      if(!s._lockNag||s.t-s._lockNag>1.2){
+        s._lockNag=s.t;
+        addFloatText(s,L.door.x+L.door.w/2,L.door.y-30,"\ud83d\udd12 "+L.keys.filter(k=>!k.got).length+" KEY(S) LEFT");
+        SFX.tick();
+      }
+    }else nextLevel(s);
+  }
   if(L.boss&&L.bossState)updateBoss(s,dt);
 
   postUpdate(s,dt);
@@ -1721,6 +2024,43 @@ function draw(s){
     for(let gx2=px2+VS;gx2<px2+p.w-VS;gx2+=VS){
       if(cellHash(gx2,py2-9)<0.22)ctx.fillRect(gx2,py2-4,VS,4);
     }
+    // gel coat: glossy goo skin with drips replaces grass on sticky platforms
+    if(p.mat==="gel"){
+      const goo=mixC(pal.accent,"#7ed44a",0.6);
+      const gooHi=mixC(goo,"#ffffff",0.4);
+      const gooDk=mixC(goo,pal.plat,0.35);
+      const gH=p.type==="ground"?Math.max(p.h,720):p.h;
+      // full skin on narrow pillars, top coat on wide ground
+      const skin=p.w<=60;
+      ctx.fillStyle=goo.replace("rgb","rgba").replace(")",",0.85)");
+      if(skin)ctx.fillRect(px2-3,py2-4,p.w+6,gH+6);
+      else ctx.fillRect(px2-2,py2-4,p.w+4,20);
+      // wobbling drips
+      ctx.fillStyle=goo;
+      const dripBase=skin?py2+gH:py2+18;
+      for(let dx3=px2+6;dx3<px2+p.w-4;dx3+=22){
+        const dl=8+cellHash(dx3,py2)*16+Math.sin(s.t*1.8+dx3*0.2)*3;
+        ctx.beginPath();
+        ctx.moveTo(dx3,dripBase);
+        ctx.quadraticCurveTo(dx3+3,dripBase+dl,dx3+4,dripBase+dl+3);
+        ctx.quadraticCurveTo(dx3+5,dripBase+dl,dx3+8,dripBase);
+        ctx.fill();
+        ctx.beginPath();ctx.arc(dx3+4,dripBase+dl+3,2.4,0,7);ctx.fill();
+      }
+      // side drips on skinned pillars
+      if(skin){
+        ctx.fillStyle=gooDk;
+        for(let dy4=py2+16;dy4<py2+gH-10;dy4+=34){
+          const wob2=Math.sin(s.t*1.5+dy4)*2;
+          ctx.beginPath();ctx.ellipse(px2-2,dy4+wob2,3.5,8,0,0,7);ctx.fill();
+          ctx.beginPath();ctx.ellipse(px2+p.w+2,dy4-wob2,3.5,8,0,0,7);ctx.fill();
+        }
+      }
+      // glossy sheen
+      ctx.fillStyle=gooHi.replace("rgb","rgba").replace(")",",0.6)");
+      ctx.fillRect(px2+3,py2-2,Math.min(p.w-6,40),3);
+      if(skin)continue; // pillars: goo skin replaces all further dressing
+    }
     // voxel grass tufts breaking the top line (positionally stable)
     const gr1=mixC(pal.accent,"#fff2cf",0.25);
     for(let gx=px2+4;gx<px2+p.w-10;gx+=17){
@@ -1795,16 +2135,100 @@ function draw(s){
   // enemies
   for(const e of s.level.enemies){
     if(e.dead)continue;
+    if(e.kind==="charger"){
+      if(e.state===2){e.cool-=dt;if(e.cool<=0)e.state=0;}
+      else if(e.state===1){
+        e.tel-=dt;
+        if(e.tel<=0){e.state=3;e.vx2=(s.px>e.x?1:-1)*430;}
+      }else if(e.state===3){
+        e.x+=e.vx2*dt;
+        if(Math.random()<0.4)s.dust.push({x:e.x+14,y:e.y+26,vx:-e.vx2*0.2,vy:-30,life:0.25,r:2});
+        if(e.x<e.x0||e.x>e.x1){e.x=Math.max(e.x0,Math.min(e.x1,e.x));e.state=2;e.cool=1.1;}
+      }else{
+        // idle: spot the player on your level
+        if(Math.abs(s.py-e.y)<70&&Math.abs(s.px-e.x)<360&&s.px>e.x0-40&&s.px<e.x1+40){e.state=1;e.tel=0.45;SFX.tick();}
+      }
+      const pr={x:s.px+4,y:s.py+6,w:PLAYER_W-8,h:PLAYER_H-6};
+      if(rectsOverlap(pr,{x:e.x,y:e.y,w:30,h:26})){
+        if(s.vy>140&&s.py+PLAYER_H<e.y+18){e.dead=true;s.vy=-420;SFX.stomp();addFloatText(s,e.x,e.y-16,"BONK!");spawnLumAt(s,e.x+14,e.y);}
+        else hurt(s);
+      }
+      continue;
+    }
+    if(e.kind==="hopper"){
+      e.vy2=(e.vy2||0)+1500*dt;
+      e.y+=e.vy2*dt;
+      if(e.y>=e.baseY){e.y=e.baseY;e.vy2=0;e.grounded2=true;}
+      e.hopT=(e.hopT||0)-dt;
+      if(e.grounded2&&e.hopT<=0){
+        e.grounded2=false;e.hopT=1.4+Math.random()*0.5;
+        e.vy2=-520;
+        e.vx2=(s.px>e.x?1:-1)*90;
+        SFX.tick();
+      }
+      if(!e.grounded2)e.x=Math.max(e.x0,Math.min(e.x1,e.x+(e.vx2||0)*dt));
+      const pr2={x:s.px+4,y:s.py+6,w:PLAYER_W-8,h:PLAYER_H-6};
+      if(rectsOverlap(pr2,{x:e.x,y:e.y,w:26,h:26})){
+        if(s.vy>140&&s.py+PLAYER_H<e.y+16){e.dead=true;s.vy=-420;SFX.stomp();spawnLumAt(s,e.x+13,e.y);}
+        else hurt(s);
+      }
+      continue;
+    }
+    if(e.kind==="charger"){
+      const tel=e.state===1, dash=e.state===3;
+      const jit=tel?Math.round(Math.sin(s.t*40)*2):0;
+      const cbase=tel||dash?"#d96b5a":mixC(pal.plat,"#d96b5a",0.5);
+      const sh2=voxShades(cbase);
+      ctx.fillStyle=cbase;ctx.fillRect(Math.round(e.x)+jit,Math.round(e.y),30,26);
+      ctx.fillStyle=sh2.l;ctx.fillRect(Math.round(e.x)+jit,Math.round(e.y),30,7);
+      ctx.fillStyle=sh2.d;ctx.fillRect(Math.round(e.x)+jit+22,Math.round(e.y)+7,8,19);
+      // angry unibrow + eyes
+      ctx.fillStyle="#fff";
+      ctx.fillRect(Math.round(e.x)+jit+5,Math.round(e.y)+9,7,6);
+      ctx.fillRect(Math.round(e.x)+jit+18,Math.round(e.y)+9,7,6);
+      ctx.fillStyle=INK;
+      ctx.fillRect(Math.round(e.x)+jit+7,Math.round(e.y)+11,3,3);
+      ctx.fillRect(Math.round(e.x)+jit+20,Math.round(e.y)+11,3,3);
+      ctx.fillRect(Math.round(e.x)+jit+4,Math.round(e.y)+6,22,2);
+      if(dash){
+        ctx.fillStyle="rgba(255,255,255,0.5)";
+        ctx.fillRect(Math.round(e.x)-(e.vx2>0?14:-30)+jit,Math.round(e.y)+8,12,3);
+        ctx.fillRect(Math.round(e.x)-(e.vx2>0?22:-38)+jit,Math.round(e.y)+16,10,3);
+      }
+      continue;
+    }
+    if(e.kind==="hopper"){
+      const sq2=e.grounded2?0.8+0.2*Math.min(1,(e.hopT||0)):1.1;
+      const hb2=Math.round(e.y), hw=26, hh=Math.round(26*sq2);
+      const hbase=mixC(pal.accent,"#ffffff",0.15);
+      const sh3=voxShades(hbase);
+      ctx.fillStyle=hbase;ctx.fillRect(Math.round(e.x),hb2+26-hh,hw,hh);
+      ctx.fillStyle=sh3.l;ctx.fillRect(Math.round(e.x),hb2+26-hh,hw,Math.max(2,hh*0.28));
+      ctx.fillStyle=sh3.d;ctx.fillRect(Math.round(e.x)+19,hb2+26-hh+4,7,hh-4);
+      // spring coil below when squashed
+      ctx.strokeStyle=mixC(hbase,"#000000",0.3);ctx.lineWidth=2;
+      if(e.grounded2){
+        ctx.beginPath();ctx.moveTo(Math.round(e.x)+4,hb2+26);ctx.lineTo(Math.round(e.x)+22,hb2+26);ctx.stroke();
+      }
+      ctx.fillStyle="#fff";
+      ctx.fillRect(Math.round(e.x)+5,hb2+26-hh+7,6,6);
+      ctx.fillRect(Math.round(e.x)+15,hb2+26-hh+7,6,6);
+      ctx.fillStyle=INK;
+      ctx.fillRect(Math.round(e.x)+7,hb2+26-hh+9,3,3);
+      ctx.fillRect(Math.round(e.x)+17,hb2+26-hh+9,3,3);
+      continue;
+    }
     if(e.kind==="walker"){
       const step2=Math.sin(s.t*12+e.x)*3;
       ctx.fillStyle="#c9564a";ctx.strokeStyle=INK;ctx.lineWidth=2.5;
       ctx.beginPath();ctx.ellipse(e.x+14,e.y+14,14,12,0,0,7);ctx.fill();ctx.stroke();
-      ctx.fillStyle="#a23d47";
-      for(let i=0;i<4;i++){
-        ctx.beginPath();
-        ctx.moveTo(e.x+4+i*7,e.y+4);ctx.lineTo(e.x+7+i*7,e.y-5);ctx.lineTo(e.x+10+i*7,e.y+4);
-        ctx.fill();
-      }
+      // soft cream bounce-cap: reads as "land here"
+      const capSq=1+0.06*Math.sin(s.t*3+e.x);
+      ctx.fillStyle="#fdf0d8";
+      ctx.beginPath();ctx.ellipse(e.x+14,e.y+3,13*capSq,6/capSq,0,Math.PI,0);ctx.fill();
+      ctx.strokeStyle=INK;ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle="rgba(255,255,255,0.8)";
+      ctx.beginPath();ctx.ellipse(e.x+9,e.y+0.5,4,1.6,0,0,7);ctx.fill();
       ctx.fillStyle="#fff";
       ctx.beginPath();ctx.arc(e.x+14+e.dir*6,e.y+11,4,0,7);ctx.fill();
       ctx.fillStyle="#221a33";
@@ -1964,6 +2388,46 @@ function draw(s){
     ctx.fillStyle="#ff6b9d";ctx.font="16px sans-serif";
     ctx.fillText("❤",sh.x+36,sh.y-44+Math.sin(s.t*3)*3);
   }
+  if(s.level.waters)for(const w2 of s.level.waters){
+    const wc=mixC(pal.sky1,"#3a7bd4",0.55);
+    ctx.fillStyle=wc.replace("rgb","rgba").replace(")",",0.4)");
+    ctx.fillRect(w2.x,w2.y,w2.w,w2.h);
+    ctx.fillStyle=wc.replace("rgb","rgba").replace(")",",0.25)");
+    ctx.fillRect(w2.x,w2.y+w2.h*0.5,w2.w,w2.h*0.5);
+    // animated surface line
+    ctx.strokeStyle="rgba(255,255,255,0.65)";ctx.lineWidth=2.5;
+    ctx.beginPath();
+    for(let sx3=w2.x;sx3<=w2.x+w2.w;sx3+=10){
+      const sy3=w2.y+Math.sin(s.t*2.2+sx3*0.05)*2.5;
+      sx3===w2.x?ctx.moveTo(sx3,sy3):ctx.lineTo(sx3,sy3);
+    }
+    ctx.stroke();
+    // sparse rising bubbles (positionally seeded, time-cycled)
+    ctx.fillStyle="rgba(255,255,255,0.5)";
+    for(let bx4=w2.x+18;bx4<w2.x+w2.w-10;bx4+=46){
+      const cyc=((s.t*22+cellHash(bx4,w2.y)*300)%(w2.h-14));
+      ctx.beginPath();ctx.arc(bx4+Math.sin(s.t*3+bx4)*3,w2.y+w2.h-8-cyc,2+cellHash(bx4,3)*1.5,0,7);ctx.fill();
+    }
+    // player wake bubbles
+    if(s.inWater===w2&&Math.random()<0.3){
+      s.dust.push({x:s.px+PLAYER_W/2+(Math.random()-0.5)*16,y:s.py+8,vx:0,vy:-60,life:0.5,r:1.6});
+    }
+  }
+  if(s.level.keys)for(const k of s.level.keys){
+    if(k.got)continue;
+    const kb=Math.sin(s.t*2.6+k.x*0.03)*5;
+    const kg=ctx.createRadialGradient(k.x,k.y+kb,3,k.x,k.y+kb,22);
+    kg.addColorStop(0,"#fff6d0");kg.addColorStop(0.5,"#f2c94c");kg.addColorStop(1,"rgba(242,201,76,0)");
+    ctx.fillStyle=kg;
+    ctx.beginPath();ctx.arc(k.x,k.y+kb,22,0,7);ctx.fill();
+    // voxel key: ring head + tooth shaft
+    vox(k.x-9,k.y-8+kb,10,"#f2c94c");
+    ctx.fillStyle=s.level.palette.sky2;
+    ctx.fillRect(Math.round(k.x-6),Math.round(k.y-5+kb),4,4);
+    vox(k.x+1,k.y-4+kb,10,"#f2c94c");
+    vox(k.x+7,k.y+2+kb,5,"#f2c94c");
+    vox(k.x+11,k.y-1+kb,4,"#f2c94c");
+  }
   if(s.level.door){
     const d=s.level.door;
     const frameC=mixC(pal.earth,"#000000",0.15);
@@ -1981,9 +2445,17 @@ function draw(s){
     const dgl=0.25+0.15*Math.sin(s.t*3);
     ctx.fillStyle="rgba(255,235,180,"+dgl.toFixed(3)+")";
     ctx.beginPath();ctx.ellipse(d.x+d.w/2,d.y+d.h/2,d.w*1.2,d.h*0.85,0,0,7);ctx.fill();
+    const kleft=s.level.keys?s.level.keys.filter(k=>!k.got).length:0;
     ctx.fillStyle="rgba(255,255,255,0.9)";
     ctx.font="bold italic 13px Georgia, serif";ctx.textAlign="center";
-    ctx.fillText("NEXT",d.x+d.w/2,d.y-34);
+    if(kleft>0){
+      ctx.fillText("\ud83d\udd12".repeat(Math.min(3,kleft)),d.x+d.w/2,d.y-34);
+      // dim the glow while locked
+      ctx.fillStyle="rgba(40,40,60,0.35)";
+      ctx.fillRect(d.x,d.y-12,d.w,d.h+12);
+    }else{
+      ctx.fillText("NEXT",d.x+d.w/2,d.y-34);
+    }
   }
   for(const d of s.dust){
     ctx.fillStyle=d.gold?"rgba(255,212,71,0.9)":"rgba(255,255,255,0.92)";
@@ -2402,7 +2874,8 @@ function updateHud(s,dt){
   const special=!!s.level.mode;
   $("upBtn").parentElement.style.display=special?"flex":"none";
   $("jumpBtn").textContent=s.level.mode==="flyer"?"FIRE":"JUMP";
-  statsChip.textContent="Lv "+s.levelNum+" · "+"❤".repeat(Math.max(0,s.hearts))+"♡".repeat(Math.max(0,s.maxHearts-s.hearts))+" · ✦ "+s.lumCount;
+  const kTxt=(s.level.keys&&s.level.keys.length)?(" · \ud83d\udd11 "+s.level.keys.filter(k=>k.got).length+"/"+s.level.keys.length):"";
+  statsChip.textContent="Lv "+s.levelNum+" · "+"❤".repeat(Math.max(0,s.hearts))+"♡".repeat(Math.max(0,s.maxHearts-s.hearts))+" · ✦ "+s.lumCount+kTxt;
   if(s.code){
     if(s.versionMismatch){
       roomChip.innerHTML='<span style="color:#ff8fa0">⚠ Version mismatch! Everyone must refresh the page (hold reload / clear cache) — v'+GAME_VERSION+'</span>';
